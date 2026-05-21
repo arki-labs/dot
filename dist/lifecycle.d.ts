@@ -1,0 +1,94 @@
+/**
+ * Lifecycle primitives for the DOT kernel.
+ *
+ * The kernel uses a 5-hook lifecycle that runs in dependency order:
+ *
+ *  - `configure` — synchronous registration of metadata, routes, services
+ *  - `boot`       — async open of resources, publishes services into `app.services`
+ *  - `start`      — async start of active work (workers, schedulers, listeners)
+ *  - `stop`       — async stop of active work, runs in reverse-topological order
+ *  - `dispose`    — async release of booted resources, runs in reverse-topological order
+ *
+ * Hook semantics, failure ordering, and idempotency rules are documented on the
+ * public `DotApp` interface in `./define-app.ts`.
+ */
+/** Identifier of a single hook in the DOT lifecycle. */
+export type DotLifecycleHook = 'configure' | 'boot' | 'start' | 'stop' | 'dispose';
+/**
+ * The complete set of lifecycle hooks in topological execution order.
+ * `stop` and `dispose` run in reverse-topological order across pips, but the
+ * sequence of hooks themselves is always `configure -> boot -> start -> stop -> dispose`.
+ */
+export declare const DOT_LIFECYCLE_HOOKS: readonly DotLifecycleHook[];
+/**
+ * Macro-states the DotApp can occupy.
+ *
+ * State transitions:
+ *
+ *   defined -> configured -> booted -> started -> stopped -> disposed
+ *                                                 |
+ *                                                 +-> disposed (skip stopped if never started)
+ *
+ *   any-of(configure|boot|start) failure -> failed
+ *
+ * `failed` and `disposed` are terminal — callers must create a new instance.
+ */
+export type DotLifecycleState = 'defined' | 'configured' | 'booted' | 'started' | 'stopped' | 'disposed' | 'failed';
+/** Stable error codes for lifecycle failures. */
+export declare const DotLifecycleErrorCode: {
+    /** A `configure` hook attempted async work (returned a Promise). */
+    readonly ConfigureAsync: "DOT_LIFECYCLE_E001";
+    /** A `configure` hook threw. */
+    readonly ConfigureFailed: "DOT_LIFECYCLE_E002";
+    /** A `boot` hook threw. */
+    readonly BootFailed: "DOT_LIFECYCLE_E003";
+    /** A `start` hook threw. */
+    readonly StartFailed: "DOT_LIFECYCLE_E004";
+    /** One or more `stop` hooks threw — aggregate. */
+    readonly StopFailed: "DOT_LIFECYCLE_E005";
+    /** One or more `dispose` hooks threw — aggregate. */
+    readonly DisposeFailed: "DOT_LIFECYCLE_E006";
+    /** Caller tried to reuse the app after dispose. */
+    readonly ReuseAfterDispose: "DOT_LIFECYCLE_E007";
+    /** Caller tried to reuse the app after a failed lifecycle. */
+    readonly ReuseAfterFailure: "DOT_LIFECYCLE_E008";
+    /** Dependency graph contains a cycle. */
+    readonly DependencyCycle: "DOT_LIFECYCLE_E009";
+    /** Pip declared a dependency that isn't registered. */
+    readonly MissingDependency: "DOT_LIFECYCLE_E010";
+    /** Pip registered twice. */
+    readonly DuplicatePip: "DOT_LIFECYCLE_E011";
+};
+export type DotLifecycleErrorCodeValue = (typeof DotLifecycleErrorCode)[keyof typeof DotLifecycleErrorCode];
+/**
+ * Structured error thrown for any lifecycle failure or misuse.
+ *
+ * Carries:
+ *  - `code`     — stable machine-readable error code (see {@link DotLifecycleErrorCode}).
+ *  - `phase`    — which hook (or pseudo-hook) failed.
+ *  - `pip`   — which pip name, when applicable.
+ *  - `cause`    — original error if wrapped from a hook throw.
+ *  - `failures` — for aggregate errors (stop/dispose), the per-pip failures.
+ */
+export declare class DotLifecycleError extends Error {
+    readonly code: DotLifecycleErrorCodeValue;
+    readonly phase: DotLifecycleHook;
+    readonly pip?: string;
+    readonly cause?: unknown;
+    readonly failures?: readonly DotLifecyclePipFailure[];
+    constructor(args: {
+        code: DotLifecycleErrorCodeValue;
+        phase: DotLifecycleHook;
+        message: string;
+        pip?: string;
+        cause?: unknown;
+        failures?: readonly DotLifecyclePipFailure[];
+    });
+}
+/** Single pip failure inside an aggregate lifecycle error (stop/dispose). */
+export type DotLifecyclePipFailure = {
+    pip: string;
+    phase: DotLifecycleHook;
+    error: unknown;
+};
+//# sourceMappingURL=lifecycle.d.ts.map
