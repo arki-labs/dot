@@ -2,15 +2,17 @@
  * @arki/dot — TypeScript-first application composition framework
  *
  * Public surface:
- *   - `defineApp(name)` — the modern entry point for composing applications.
- *   - `defineDotPip(config)` — define lifecycle-aware pips.
+ *   - `defineApp(name)` — the entry point for composing applications.
+ *   - `pip(config)` — author lifecycle-aware pips with typed needs/provides.
+ *   - `service<T>()` / `token<T>()(key)` — service witnesses for DI wiring.
+ *   - `rename(pip, map)` — mount-time multi-instance primitive.
  *   - Lifecycle / manifest / diagnostics types.
  *   - `testApp` / `bootTestApp` — test harnesses for pip authors.
  */
 export { defineApp } from './define-app.js';
-export type { DotApp, DotAppBuilder, DotAppConfigured } from './define-app.js';
-export { defineDotPip, DotPipError } from './pip-contract.js';
-export type { DotPip, DotBootContext, DotBootResult, DotConfigureContext, DotDisposeContext, DotManifestContext, DotManifestContribution, DotStartContext, DotStopContext, } from './pip-contract.js';
+export type { DotApp, DotAppBuilder, DotAppConfigured, UseGuard } from './define-app.js';
+export { isLazy, lazy, lazyOf, pip, provide, rename, service, token, DotPipError } from './pip-contract.js';
+export type { AnyPip, CtxOf, DotConfigureContext, EmptyShape, KernelCtx, Lazy, LazyService, NeedsShape, Pip, PipNeeds, PipProvides, RenamedProvides, Service, ServiceRecord, Token, WireNeeds, } from './pip-contract.js';
 export { DotLifecycleError, DotLifecycleErrorCode, DOT_LIFECYCLE_HOOKS, } from './lifecycle.js';
 export type { DotLifecycleHook, DotLifecycleState, DotLifecyclePipFailure, DotLifecycleErrorCodeValue, } from './lifecycle.js';
 export type { DotAppManifest, PipManifest, RouteManifest, ServiceManifest, LifecycleManifest, DependencyEdge, DependencyEdgeKind, ServiceKind, RouteTransport, } from './manifest.js';

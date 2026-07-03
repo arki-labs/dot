@@ -1,13 +1,15 @@
 /**
  * Lifecycle primitives for the DOT kernel.
  *
- * The kernel uses a 5-hook lifecycle that runs in dependency order:
+ * The kernel uses a 5-hook lifecycle that runs in declaration order
+ * (providers are `.use()`d before their consumers — the app builder's
+ * type-level guard enforces this at compile time):
  *
  *  - `configure` — synchronous registration of metadata, routes, services
  *  - `boot`       — async open of resources, publishes services into `app.services`
  *  - `start`      — async start of active work (workers, schedulers, listeners)
- *  - `stop`       — async stop of active work, runs in reverse-topological order
- *  - `dispose`    — async release of booted resources, runs in reverse-topological order
+ *  - `stop`       — async stop of active work, runs in reverse declaration order
+ *  - `dispose`    — async release of booted resources, runs in reverse declaration order
  *
  * Hook semantics, failure ordering, and idempotency rules are documented on the
  * public `DotApp` interface in `./define-app.ts`.
@@ -15,8 +17,8 @@
 /** Identifier of a single hook in the DOT lifecycle. */
 export type DotLifecycleHook = 'configure' | 'boot' | 'start' | 'stop' | 'dispose';
 /**
- * The complete set of lifecycle hooks in topological execution order.
- * `stop` and `dispose` run in reverse-topological order across pips, but the
+ * The complete set of lifecycle hooks in execution order.
+ * `stop` and `dispose` run in reverse declaration order across pips, but the
  * sequence of hooks themselves is always `configure -> boot -> start -> stop -> dispose`.
  */
 export declare const DOT_LIFECYCLE_HOOKS: readonly DotLifecycleHook[];
@@ -52,12 +54,12 @@ export declare const DotLifecycleErrorCode: {
     readonly ReuseAfterDispose: "DOT_LIFECYCLE_E007";
     /** Caller tried to reuse the app after a failed lifecycle. */
     readonly ReuseAfterFailure: "DOT_LIFECYCLE_E008";
-    /** Dependency graph contains a cycle. */
-    readonly DependencyCycle: "DOT_LIFECYCLE_E009";
-    /** Pip declared a dependency that isn't registered. */
-    readonly MissingDependency: "DOT_LIFECYCLE_E010";
     /** Pip registered twice. */
     readonly DuplicatePip: "DOT_LIFECYCLE_E011";
+    /** A pip's `needs` entry has no provider among earlier-booted pips. */
+    readonly UnsatisfiedNeed: "DOT_LIFECYCLE_E012";
+    /** A pip published a wire key that an earlier pip already provides. */
+    readonly ServiceCollision: "DOT_LIFECYCLE_E013";
 };
 export type DotLifecycleErrorCodeValue = (typeof DotLifecycleErrorCode)[keyof typeof DotLifecycleErrorCode];
 /**

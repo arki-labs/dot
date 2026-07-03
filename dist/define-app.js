@@ -1,10 +1,16 @@
 /**
- * Public entry point for the new DOT kernel.
+ * Public entry point for the DOT kernel (v2).
  *
  * `defineApp(name)` returns a `DotAppBuilder` that accumulates pips via
  * `.use(pip)`, then transitions through the 5-hook lifecycle:
  *
  *   defineApp -> use* -> configure() -> boot() -> start() -> stop() -> dispose()
+ *
+ * `.use()` is compile-time guarded: a pip whose `needs` are not satisfied
+ * by services provided so far — or whose provides collide with existing
+ * wire keys — fails to typecheck at the call site ("Expected 2 arguments,
+ * but got 1", with the diagnostic embedded in the expected second
+ * argument's type). Declaration order IS boot order.
  *
  * Most callers don't need to call `configure()` explicitly — `boot()` runs it
  * implicitly. `boot()` is also implicit when starting from `defined` via
@@ -20,7 +26,7 @@ import { renderTimeline } from './timeline.js';
  * @example
  * const app = await defineApp('my-app')
  *   .use(dbPip)
- *   .use(authPip)
+ *   .use(billingPip)   // billing's needs must be satisfied by now
  *   .boot();
  *
  * await app.start();
@@ -48,8 +54,11 @@ function buildImpl(state) {
     });
 }
 function makeBuilder(state) {
-    return {
-        use(pip) {
+    // The `use` implementation is signature-erased (the guard exists purely
+    // at the type level); the single cast below is the same kernel boundary
+    // v1 crossed in its wrapApp helper.
+    const impl = {
+        use(pip, ..._guard) {
             const nextState = {
                 ...state,
                 pips: [...state.pips, pip],
@@ -57,21 +66,22 @@ function makeBuilder(state) {
             return makeBuilder(nextState);
         },
         configure() {
-            const impl = buildImpl(state);
-            impl.runConfigure();
-            return wrapConfigured(impl);
+            const appImpl = buildImpl(state);
+            appImpl.runConfigure();
+            return wrapConfigured(appImpl);
         },
         async boot() {
-            const impl = buildImpl(state);
-            await impl.boot();
-            return wrapApp(impl);
+            const appImpl = buildImpl(state);
+            await appImpl.boot();
+            return wrapApp(appImpl);
         },
         async start() {
-            const impl = buildImpl(state);
-            await impl.start();
-            return wrapApp(impl);
+            const appImpl = buildImpl(state);
+            await appImpl.start();
+            return wrapApp(appImpl);
         },
     };
+    return impl;
 }
 function wrapApp(impl) {
     return {

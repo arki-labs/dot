@@ -1,63 +1,192 @@
 /**
- * Public pip contract for the DOT kernel.
+ * Public pip contract for the DOT kernel (v2).
  *
- * A `DotPip` is a plain object with a name, optional dependency list, and
- * up to five lifecycle hooks. The kernel calls each hook in dependency order
- * (or reverse-dependency order for `stop`/`dispose`).
+ * A pip declares what it **needs** as a shape of type witnesses and
+ * publishes what it **provides** from its `boot` hook. The kernel wires
+ * services by key, injects them into hook contexts under the pip's local
+ * aliases, and fails loudly (coded errors) on unsatisfied needs or key
+ * collisions.
  *
  * Design constraints:
  *
- *  - `configure` is SYNC. Returning a Promise is an error — the kernel will
- *    throw {@link DotLifecycleError} with code `DOT_LIFECYCLE_E001`.
- *  - `boot` may publish services into the app; downstream pips see them via
- *    {@link DotBootContext.services}.
- *  - `stop` and `dispose` continue through individual pip failures and
- *    report an aggregate error.
+ *  - `configure` is SYNC. Returning a Promise is an error — the kernel
+ *    throws {@link DotLifecycleError} with code `DOT_LIFECYCLE_E001`.
+ *  - Declaration order IS boot order. The app builder's type-level guard
+ *    makes out-of-order composition a compile error; the kernel re-validates
+ *    at runtime for erased/dynamic composition.
+ *  - `stop` and `dispose` run in reverse declaration order and continue
+ *    through individual pip failures, reporting an aggregate error.
  */
-import type { DotLifecycleHook } from './lifecycle.js';
-import type { DependencyEdgeKind, RouteTransport, ServiceKind } from './manifest.js';
+import type { RouteTransport, ServiceKind } from './manifest.js';
+declare const TypeOf: unique symbol;
 /**
- * Aggregate registration record produced during the `configure` phase.
- *
- * The kernel exposes one of these to each pip via {@link DotConfigureContext}
- * and uses the merged result to build the final `DotAppManifest`.
+ * Phantom type witness for a service. Carries `T` at the type level only —
+ * the runtime value is an empty object.
  */
-export type DotManifestContribution = {
-    /** Services this pip publishes. */
-    services?: readonly {
-        name: string;
-        kind: ServiceKind;
-    }[];
-    /** Routes this pip exposes. */
-    routes?: readonly {
-        id: string;
-        method?: string;
-        path?: string;
-        transport: RouteTransport;
-    }[];
-    /** Additional `provides` capability strings (joined with the pip's `provides`). */
-    provides?: readonly string[];
-    /** Additional dependency edges. */
-    dependencies?: readonly {
-        to: string;
-        kind?: DependencyEdgeKind;
-    }[];
+export type Service<T> = {
+    readonly [TypeOf]?: T;
 };
-/** Context provided to a `manifest` callback. */
-export type DotManifestContext<TServices extends Record<string, unknown>> = {
-    pipName: string;
-    /** Services published by dependencies that have already booted (read-only). */
-    services: Readonly<Partial<TServices>>;
+declare const LazyInner: unique symbol;
+/**
+ * A lazy-lifting witness (create via {@link service.lazy}). The consumer
+ * always receives a `Lazy<T>` handle, regardless of whether the provider
+ * published a plain `T` (the kernel lifts it into a pre-initialized
+ * handle) or a `Lazy<T>` (passed through). This decouples consumers from
+ * the provider's eager-vs-lazy strategy.
+ *
+ * The phantom `Service<T | Lazy<T>>` base is what the wiring guard checks
+ * against — either provider shape satisfies it structurally.
+ */
+export type LazyService<T> = Service<T | Lazy<T>> & {
+    readonly lazy: true;
+    readonly [LazyInner]?: T;
 };
-/** Context provided to a `configure` hook. */
+/**
+ * Create an app-local (anonymous) service witness for a `needs` shape.
+ *
+ * `service.lazy<T>()` creates a lifting witness instead — the hook context
+ * delivers a `Lazy<T>` handle whether the provider is eager or lazy.
+ */
+export declare const service: (<T>() => Service<T>) & {
+    readonly lazy: <T>() => LazyService<T>;
+};
+/** Internal (kernel) check: is this witness a lazy-lifting one? */
+export declare function isLazyWitness(witness: object): boolean;
+/**
+ * Shared, named witness — a cross-package service contract. The `key` is
+ * the wire name used for satisfaction checks and runtime lookup; the local
+ * property name in a `needs` shape becomes a free-choice alias.
+ *
+ * @example
+ * ```ts
+ * // packages/db owns the contract:
+ * export const Db = token<NodePgDatabase<Schema>>()('arki.db');
+ *
+ * // any consumer, any local alias:
+ * const reports = pip({
+ *   name: 'reports',
+ *   needs: { db: Db },
+ *   async boot({ db }) { ... },
+ * });
+ * ```
+ */
+export type Token<T, K extends string = string> = Service<T> & {
+    readonly key: K;
+    /** Derive a token for an additional instance of the same contract. */
+    instance<N extends string>(name: N): Token<T, `${K}#${N}`>;
+};
+/**
+ * Create a token. Curried so `T` is explicit while `K` is inferred as a
+ * literal: `const Db = token<DbHandle>()('arki.db')`.
+ */
+export declare function token<T>(): <K extends string>(key: K) => Token<T, K>;
+/**
+ * Publish a value under a token's wire key. Returns a record typed by the
+ * token's literal key, so `boot: () => provide(Db, handle)` infers
+ * `TProvides = { 'arki.db': DbHandle }`.
+ */
+export declare function provide<T, K extends string>(tok: Token<T, K>, value: T): {
+    [P in K]: T;
+};
+/** Record of wire-keyed services. */
+export type ServiceRecord = Record<string, unknown>;
+/** Runtime brand for lazy service handles (kernel detects these for auto-dispose). */
+export declare const LazyTag: unique symbol;
+/**
+ * A lazily-initialized service handle. Publish one from `boot` to defer an
+ * expensive open until first use:
+ *
+ * ```ts
+ * boot: () => ({ db: lazy(() => openDb(), { dispose: db => db.close() }) })
+ * ```
+ *
+ * Laziness is visible in the type — consumers declare
+ * `needs: { db: service<Lazy<Db>>() }` and call `await db.get()`. The
+ * kernel auto-disposes initialized handles in reverse declaration order
+ * during `dispose` (and boot rollback), even when the publishing pip has
+ * no `dispose` hook. A handle that was never `get()`ed never initializes
+ * and never runs cleanup.
+ */
+export type Lazy<T> = {
+    readonly [LazyTag]: true;
+    /**
+     * Initialize (once) and return the value. Concurrent callers share one
+     * attempt. A failed attempt is NOT cached — the next call retries.
+     * Throws if the handle has been disposed.
+     */
+    get(): Promise<T>;
+    /** True once an initialization attempt has succeeded. */
+    readonly initialized: boolean;
+    /** The value if initialized, else `undefined`. Never triggers initialization. */
+    peek(): T | undefined;
+    /**
+     * Run cleanup if initialized (awaits an in-flight initialization first).
+     * Idempotent. Called automatically by the kernel for published handles.
+     */
+    dispose(): Promise<void>;
+};
+/**
+ * Create a lazy service handle. See {@link Lazy} for semantics.
+ *
+ * @param init - Opens the resource. Runs at most once concurrently; a
+ *   rejected attempt is not cached, so a later `get()` retries.
+ * @param options.dispose - Cleanup for the initialized value. Skipped when
+ *   the handle was never initialized.
+ */
+export declare function lazy<T>(init: () => Promise<T> | T, options?: {
+    readonly dispose?: (value: T) => Promise<void> | void;
+}): Lazy<T>;
+/** Type guard: is this published value a lazy service handle? */
+export declare function isLazy(value: unknown): value is Lazy<unknown>;
+/**
+ * Wrap an already-available value in a pre-initialized `Lazy<T>` handle.
+ * Used by the kernel to lift eager provides for `service.lazy` consumers;
+ * also handy for handing fakes to lazy-consuming pips in tests. The handle
+ * has no cleanup of its own — the underlying value's lifecycle belongs to
+ * whoever created it.
+ */
+export declare function lazyOf<T>(value: T): Lazy<T>;
+/** A `needs` declaration: local alias → witness (anonymous or token). */
+export type NeedsShape = Record<string, Service<unknown>>;
+export type EmptyShape = {};
+/**
+ * Local-alias view of a needs shape — what lifecycle hooks destructure.
+ * `{ cache: Token<KV, 'arki.kv'> }` → `{ cache: KV }`.
+ * `{ search: service.lazy<S>() }` → `{ search: Lazy<S> }`.
+ */
+export type CtxOf<S extends NeedsShape> = {
+    [K in keyof S]: S[K] extends LazyService<infer T> ? Lazy<T> : S[K] extends Service<infer T> ? T : never;
+};
+/**
+ * Wire-key view of a needs shape — what the app builder checks
+ * satisfaction against. Tokens contribute their owned key; anonymous
+ * witnesses contribute the property name.
+ * `{ cache: Token<KV, 'arki.kv'> }` → `{ 'arki.kv': KV }`.
+ */
+export type WireNeeds<S extends NeedsShape> = {
+    [K in keyof S as S[K] extends Token<unknown, infer WK> ? WK : K]: S[K] extends Service<infer T> ? T : never;
+};
+/**
+ * Kernel-supplied context keys, present in every service-carrying hook
+ * context. `$`-prefixed so they can never collide with service aliases.
+ */
+export type KernelCtx = {
+    /** App name (passed to `defineApp`). */
+    readonly $app: string;
+    /** This pip's name. */
+    readonly $pip: string;
+    /** Read-only runtime config bag from `defineApp(name, { config })`. */
+    readonly $config: Readonly<Record<string, unknown>>;
+};
+/** Context provided to a `configure` hook (sync registration only). */
 export type DotConfigureContext = {
     pipName: string;
     /** App name. */
     appName: string;
     /**
-     * Register a service this pip publishes.
-     * Registration is metadata-only — the actual service instance is returned
-     * from the `boot` hook in `DotBootResult.services`.
+     * Register a service this pip publishes, for manifest/diagnostics
+     * purposes. Registration is metadata-only — the actual service instance
+     * is returned from the `boot` hook.
      */
     registerService(name: string, kind: ServiceKind): void;
     /** Register a route this pip exposes. */
@@ -68,108 +197,98 @@ export type DotConfigureContext = {
         transport: RouteTransport;
     }): void;
     /** Mark the pip as participating in a lifecycle hook. */
-    registerLifecycleHook(hook: DotLifecycleHook): void;
-    /** Append `provides` capability strings. */
+    registerLifecycleHook(hook: 'configure' | 'boot' | 'start' | 'stop' | 'dispose'): void;
+    /** Append `provides` capability strings (informational, manifest-only). */
     declareProvides(...capabilities: string[]): void;
-    /** Append an extra dependency edge (alongside `pip.dependencies`). */
-    declareDependency(to: string, kind?: DependencyEdgeKind): void;
 };
-/** Context provided to a `boot` hook. */
-export type DotBootContext = {
-    pipName: string;
-    appName: string;
-    /**
-     * Services published by prior-booted pips, keyed by service name.
-     * Use this for dependency injection between pips.
-     */
-    services: ReadonlyMap<string, unknown>;
-    /** Read-only configuration bag. */
-    config: Readonly<Record<string, unknown>>;
-};
-/** Context provided to a `start` hook. */
-export type DotStartContext<TServices extends Record<string, unknown>> = {
-    pipName: string;
-    appName: string;
-    services: TServices;
-};
-/** Context provided to a `stop` hook. */
-export type DotStopContext<TServices extends Record<string, unknown>> = {
-    pipName: string;
-    appName: string;
-    services: TServices;
-};
-/** Context provided to a `dispose` hook. */
-export type DotDisposeContext<TServices extends Record<string, unknown>> = {
-    pipName: string;
-    appName: string;
-    services: TServices;
-};
-/** Return value of a `boot` hook. */
-export type DotBootResult<TServices extends Record<string, unknown>> = {
-    /** Services this pip publishes — added to `app.services` and visible to dependent pips. */
-    services?: TServices;
-};
+type MaybePromise<T> = T | Promise<T>;
+declare const NeedsSym: unique symbol;
+declare const ProvidesSym: unique symbol;
 /**
- * The DOT pip contract.
+ * The DOT pip (v2). Author through {@link pip} — never construct directly.
  *
- * Default `TServices` is `Record<string, never>` so pips that don't publish
- * services don't have to specify a type argument. Default `TManifest` is the
- * full contribution shape.
+ * Hook signatures are type-erased here (`ctx: never`): the typed view
+ * lives on `pip()`'s parameter, and `(ctx: Typed) => R` is assignable to
+ * `(ctx: never) => R` without casts (parameter contravariance from the
+ * bottom type). The kernel crosses the erasure boundary at the call site.
+ *
+ * The phantom symbol properties carry `TNeeds` / `TProvides` for the app
+ * builder's compile-time wiring check; they never exist at runtime.
  */
-export type DotPip<TServices extends Record<string, unknown> = Record<string, never>, TManifest extends DotManifestContribution = DotManifestContribution> = {
+export type Pip<TNeeds extends ServiceRecord = ServiceRecord, TProvides extends ServiceRecord = ServiceRecord> = {
     /** Unique identifier for this pip within the app. */
-    name: string;
+    readonly name: string;
     /** Optional semantic version string. */
-    version?: string;
-    /**
-     * Names of pips this one depends on.
-     * The kernel ensures dependencies are configured/booted/started first, and
-     * stopped/disposed last.
-     */
-    dependencies?: readonly string[];
-    /** Capability strings this pip advertises (for `dependencies` resolution by capability). */
-    provides?: readonly string[];
-    /**
-     * Optional static or callback-form manifest contribution. The kernel merges
-     * this into the final manifest after `configure` runs.
-     */
-    manifest?: TManifest | ((ctx: DotManifestContext<TServices>) => TManifest);
-    /**
-     * SYNC registration hook. Declare metadata, register routes/services/jobs.
-     * MUST NOT perform IO, MUST NOT return a Promise.
-     */
-    configure?: (ctx: DotConfigureContext) => void;
-    /** Async open-resources hook. Returns published services for DI. */
-    boot?: (ctx: DotBootContext) => Promise<DotBootResult<TServices>> | DotBootResult<TServices>;
-    /** Async begin-active-work hook. Runs after every pip's `boot` succeeds. */
-    start?: (ctx: DotStartContext<TServices>) => Promise<void> | void;
-    /** Async halt-active-work hook. Runs in reverse-topological order. */
-    stop?: (ctx: DotStopContext<TServices>) => Promise<void> | void;
-    /** Async release-resources hook. Runs in reverse-topological order. */
-    dispose?: (ctx: DotDisposeContext<TServices>) => Promise<void> | void;
+    readonly version?: string;
+    /** Runtime needs shape (local alias → witness). */
+    readonly needs: NeedsShape;
+    /** Mount-time renames: publish key → new wire key (see {@link rename}). */
+    readonly renames: Readonly<Record<string, string>>;
+    readonly hooks: {
+        readonly configure?: (ctx: DotConfigureContext) => void;
+        readonly boot?: (ctx: never) => MaybePromise<ServiceRecord | void>;
+        readonly start?: (ctx: never) => MaybePromise<void>;
+        readonly stop?: (ctx: never) => MaybePromise<void>;
+        readonly dispose?: (ctx: never) => MaybePromise<void>;
+    };
+    readonly [NeedsSym]?: TNeeds;
+    readonly [ProvidesSym]?: TProvides;
 };
+/** Extract a pip's (wire-keyed) needs record. */
+export type PipNeeds<P> = P extends Pip<infer N, ServiceRecord> ? N : never;
+/** Extract a pip's (wire-keyed) provides record. */
+export type PipProvides<P> = P extends Pip<ServiceRecord, infer Pr> ? Pr : never;
+/** Internal type alias used by the kernel to erase pip service generics. */
+export type AnyPip = Pip<ServiceRecord, ServiceRecord>;
 /**
- * Type-narrowing helper for pip authors.
+ * Author a DOT pip.
+ *
+ * - `TShape` is inferred from the `needs` object literal.
+ * - `TProvides` is inferred from `boot`'s return type — no generic argument.
+ * - `boot({ db, log, $app })` destructures typed services under the local
+ *   aliases declared in `needs`, plus the `$`-prefixed kernel keys.
+ * - `start` / `stop` / `dispose` additionally receive the pip's own
+ *   provides. Reverse-order teardown guarantees needs are still alive in
+ *   `dispose`.
  *
  * @example
- * export const myPip = defineDotPip<{ db: MyDb }>({
- *   name: 'my-pip',
- *   async boot() {
- *     const db = await openDb();
- *     return { services: { db } };
+ * ```ts
+ * export const billing = pip({
+ *   name: 'billing',
+ *   needs: { db: service<Db>(), log: service<Logger>() },
+ *   async boot({ db, log }) {
+ *     return { billing: new BillingService(db, log) };
  *   },
- *   async dispose({ services }) {
- *     await services.db.close();
+ *   async dispose({ billing }) {
+ *     await billing.flush();
  *   },
  * });
+ * ```
  */
-export declare function defineDotPip<TServices extends Record<string, unknown> = Record<string, never>>(pip: DotPip<TServices>): DotPip<TServices>;
-/** Internal type alias used by the kernel to erase pip service generics. */
-export type AnyDotPip = DotPip<Record<string, unknown>, DotManifestContribution>;
-/** Internal helper: extract the `provides` field from a pip (always returns an array). */
-export declare function pipProvides(pip: AnyDotPip): readonly string[];
-/** Internal helper: extract the `dependencies` field from a pip (always returns an array). */
-export declare function pipDependencies(pip: AnyDotPip): readonly string[];
+export declare function pip<TShape extends NeedsShape = EmptyShape, TProvides extends ServiceRecord = EmptyShape>(def: {
+    readonly name: string;
+    readonly version?: string;
+    readonly needs?: TShape;
+    readonly configure?: (ctx: DotConfigureContext) => void;
+    readonly boot?: (ctx: CtxOf<TShape> & KernelCtx) => MaybePromise<TProvides | void>;
+    readonly start?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
+    readonly stop?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
+    readonly dispose?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
+}): Pip<WireNeeds<TShape>, TProvides>;
+/** Rename a pip's published wire keys — the multi-instance primitive. */
+export type RenamedProvides<TP, M> = {
+    [K in keyof TP as K extends keyof M ? (M[K] extends string ? M[K] : K) : K]: TP[K];
+};
+/**
+ * Mount-time rename. `rename(dbPip, { db: 'reportsDb' }, 'reports-db')`
+ * publishes the same service under a different wire key, retyped
+ * accordingly — the way to mount a second instance of an adapter without
+ * a key collision. Renames compose: renaming an already-renamed key
+ * rewrites the earlier entry.
+ */
+export declare function rename<TN extends ServiceRecord, TP extends ServiceRecord, const M extends {
+    readonly [K in keyof TP]?: string;
+}>(p: Pip<TN, TP>, map: M, newName?: string): Pip<TN, RenamedProvides<TP, M>>;
 /**
  * Stable error thrown by DOT pip adapters.
  *
@@ -185,20 +304,6 @@ export declare function pipDependencies(pip: AnyDotPip): readonly string[];
  *
  * @see packages/dot/docs/principles.md — principle 1.3 ("errors are part
  * of the API") and principle 4 ("agent-discoverable everywhere").
- *
- * @example
- * ```ts
- * import { DotPipError } from '@arki/dot/pip';
- *
- * const KV_PIP_ERROR_CODES = { urlNotConfigured: 'KV_PIP_E001' } as const;
- *
- * throw new DotPipError({
- *   code: KV_PIP_ERROR_CODES.urlNotConfigured,
- *   message: '[kv] KV URL is not configured.',
- *   remediation: 'Pass options.url to kv(...) or set KV_URL in the environment.',
- *   docsUrl: 'https://arki.dev/dot/errors/kv-pip-e001',
- * });
- * ```
  */
 export declare class DotPipError extends Error {
     /** Stable error code, e.g. `KV_PIP_E001`. */
