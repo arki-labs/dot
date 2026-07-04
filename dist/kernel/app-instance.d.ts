@@ -49,7 +49,7 @@ export declare class DotAppImpl {
     runConfigure(): void;
     /** Public boot() — idempotent + concurrent-safe. */
     boot(): Promise<void>;
-    /** Public start(). Boots first if needed. Idempotent. */
+    /** Public start(). Boots first if needed. Idempotent + concurrent-safe. */
     start(): Promise<void>;
     /** Public stop(). Idempotent + concurrent-safe. */
     stop(): Promise<void>;
