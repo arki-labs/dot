@@ -62,6 +62,8 @@ export declare const DotLifecycleErrorCode: {
     readonly ServiceCollision: "DOT_LIFECYCLE_E013";
     /** A needs alias, publish key, or rename target uses the reserved `$` prefix. */
     readonly ReservedServiceKey: "DOT_LIFECYCLE_E014";
+    /** A lifecycle hook exceeded the app's `hookTimeoutMs` watchdog. */
+    readonly HookTimeout: "DOT_LIFECYCLE_E015";
 };
 export type DotLifecycleErrorCodeValue = (typeof DotLifecycleErrorCode)[keyof typeof DotLifecycleErrorCode];
 /**

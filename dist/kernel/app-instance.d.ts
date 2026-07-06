@@ -21,6 +21,8 @@ export type DotAppInternalConfig = {
      * happen before there's a public seam to call `subscribe()` on.
      */
     observers?: readonly DotLifecycleObserver[];
+    /** Per-hook watchdog budget in ms — see `defineApp`'s option of the same name. */
+    hookTimeoutMs?: number;
 };
 /**
  * Internal app implementation. Public consumers see the `DotApp` interface

@@ -25,6 +25,7 @@ import { runNew } from './new.js';
 import { probeObservability } from './observability-probe.js';
 import { renderDoctor } from './render-doctor.js';
 import { renderExplain } from './render-explain.js';
+import { renderGraph } from './render-graph.js';
 const debugCli = createDebugLogger('arki:dot:cli');
 const VERSION = '0.1.0';
 const HELP_TEXT = `dot — CLI for inspecting and scaffolding DOT apps
@@ -46,6 +47,10 @@ Common options:
   --app <path>           Path to the app entry file (default: discovers
                          ./dot.config.ts, ./src/app.ts, or ./app.ts)
   --cwd <dir>            Working directory (default: current)
+  --graph                Emit the pip graph as Mermaid flowchart source
+                         instead of the standard output. explain shows
+                         declaration (= boot) order; doctor shows the
+                         wiring observed during boot. Composes with --json.
 
 \`doctor\` options:
   --observability        Also probe whether an OpenTelemetry SDK is
@@ -116,6 +121,7 @@ export function parseArgs(argv) {
                 'dry-run': { type: 'boolean', default: false },
                 force: { type: 'boolean', default: false },
                 observability: { type: 'boolean', default: false },
+                graph: { type: 'boolean', default: false },
             },
         });
     }
@@ -157,6 +163,7 @@ export function parseArgs(argv) {
         dryRun: values['dry-run'] ?? false,
         force: values.force ?? false,
         observability: values.observability ?? false,
+        graph: values.graph ?? false,
     };
 }
 /** Discovery wrapper — returns `null` for help/version commands. */
@@ -182,6 +189,9 @@ export async function runExplain(discovered, opts) {
     catch (err) {
         throw wrapLifecycleError(err, 'configure');
     }
+    if (opts.graph === true) {
+        return renderGraph({ manifest: configured.manifest, command: 'explain' }, { json: opts.json, out: opts.out, now: opts.now });
+    }
     return renderExplain({ manifest: configured.manifest }, { json: opts.json, out: opts.out, now: opts.now });
 }
 /**
@@ -198,6 +208,9 @@ export async function runDoctor(discovered, opts) {
     // Already-booted app: just read diagnostics, don't touch lifecycle.
     if (!guards.isDotAppBuilder(discovered) && !guards.isDotAppConfigured(discovered)) {
         const app = discovered;
+        if (opts.graph === true) {
+            return renderGraph({ manifest: app.manifest, command: 'doctor' }, { json: opts.json, out: opts.out, now: opts.now });
+        }
         const diagnostics = applyObservabilityProbe(app.diagnostics, opts.observability ?? false);
         return renderDoctor({ diagnostics }, { json: opts.json, out: opts.out, now: opts.now });
     }
@@ -226,6 +239,13 @@ export async function runDoctor(discovered, opts) {
         debugCli('boot threw, falling back to configured diagnostics: %O', err);
     }
     try {
+        if (opts.graph === true) {
+            // Post-boot manifest carries the observed wiring edges; after a boot
+            // failure it carries the edges recorded up to the failing pip.
+            const manifest = bootedApp ? bootedApp.manifest : configured.manifest;
+            const graphEnvelope = renderGraph({ manifest, command: 'doctor' }, { json: opts.json, out: opts.out, now: opts.now });
+            return bootThrew ? { ...graphEnvelope, status: 'failure' } : graphEnvelope;
+        }
         const rawDiagnostics = bootedApp ? bootedApp.diagnostics : configured.diagnostics;
         const diagnostics = applyObservabilityProbe(rawDiagnostics, opts.observability ?? false);
         const envelope = renderDoctor({ diagnostics }, { json: opts.json, out: opts.out, now: opts.now });
@@ -369,7 +389,7 @@ export async function main(options) {
     }
     try {
         const discovered = await loadApp(args);
-        const opts = { json: args.json, out: stdout, now: nowFactory };
+        const opts = { json: args.json, graph: args.graph, out: stdout, now: nowFactory };
         let envelope;
         if (args.command === 'explain') {
             envelope = await runExplain(discovered, opts);

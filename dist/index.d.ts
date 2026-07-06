@@ -20,7 +20,9 @@ export type { DotDiagnosticsSnapshot, PipDiagnostic, RouteDiagnostic, ServiceDia
 export type { DotLifecycleEvent, DotLifecycleEventStatus, DotLifecycleObserver, DotPhaseLifecycleEvent, DotPipHookLifecycleEvent, } from './lifecycle-observer.js';
 export { renderTimeline } from './timeline.js';
 export type { RenderTimelineOptions } from './timeline.js';
-export { testApp, bootTestApp } from './test-harness.js';
-export type { TestAppOptions } from './test-harness.js';
+export { testApp, bootTestApp, testPip } from './test-harness.js';
+export type { TestAppOptions, TestPipBuilder } from './test-harness.js';
+export { hookSignals } from './signals.js';
+export type { HookSignalsOptions, SignalTarget } from './signals.js';
 export type { DotCliEnvelope, DotCliEnvelopeStatus } from './cli/render-explain.js';
 //# sourceMappingURL=index.d.ts.map

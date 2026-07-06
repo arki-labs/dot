@@ -41,6 +41,7 @@ export function defineApp(name, options = {}) {
         pips: [],
         config: options.config,
         observers: options.observers,
+        hookTimeoutMs: options.hookTimeoutMs,
     };
     return makeBuilder(state);
 }
@@ -51,6 +52,7 @@ function buildImpl(state) {
         pips: state.pips,
         config: state.config,
         observers: state.observers,
+        hookTimeoutMs: state.hookTimeoutMs,
     });
 }
 function makeBuilder(state) {

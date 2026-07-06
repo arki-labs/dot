@@ -37,6 +37,8 @@ export type CliArgs = {
     force?: boolean;
     /** `--observability` (only honored by `doctor`). */
     observability?: boolean;
+    /** `--graph` (honored by `explain` and `doctor`). */
+    graph?: boolean;
 };
 /**
  * Parse argv into a typed shape. Exported so tests can exercise it without
@@ -49,6 +51,7 @@ export declare function parseArgs(argv: readonly string[]): CliArgs;
  */
 export declare function runExplain(discovered: DiscoveredApp, opts: {
     json: boolean;
+    graph?: boolean;
     out?: (line: string) => void;
     now?: () => Date;
 }): Promise<DotCliEnvelope<unknown>>;
@@ -62,6 +65,8 @@ type DoctorRunOptions = {
      * present. Default `false`.
      */
     observability?: boolean;
+    /** When `true`, emit the pip graph (Mermaid) instead of diagnostics. */
+    graph?: boolean;
 };
 /**
  * Run `doctor` on a discovered app. The CLI owns boot+dispose only when it
