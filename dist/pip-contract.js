@@ -137,31 +137,6 @@ export function lazyOf(value) {
         },
     };
 }
-/**
- * Author a DOT pip.
- *
- * - `TShape` is inferred from the `needs` object literal.
- * - `TProvides` is inferred from `boot`'s return type — no generic argument.
- * - `boot({ db, log, $app })` destructures typed services under the local
- *   aliases declared in `needs`, plus the `$`-prefixed kernel keys.
- * - `start` / `stop` / `dispose` additionally receive the pip's own
- *   provides. Reverse-order teardown guarantees needs are still alive in
- *   `dispose`.
- *
- * @example
- * ```ts
- * export const billing = pip({
- *   name: 'billing',
- *   needs: { db: service<Db>(), log: service<Logger>() },
- *   async boot({ db, log }) {
- *     return { billing: new BillingService(db, log) };
- *   },
- *   async dispose({ billing }) {
- *     await billing.flush();
- *   },
- * });
- * ```
- */
 export function pip(def) {
     return {
         name: def.name,

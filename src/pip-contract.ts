@@ -313,8 +313,25 @@ export type DotConfigureContext = {
    * is returned from the `boot` hook.
    */
   registerService(name: string, kind: ServiceKind): void;
-  /** Register a route this pip exposes. */
-  registerRoute(route: { id: string; method?: string; path?: string; transport: RouteTransport }): void;
+  /**
+   * Register a route this pip exposes. The optional `description`,
+   * `input`/`output` JSON Schemas, and `streaming` flag flow into
+   * `manifest.routes` untouched — `dot explain --openapi` renders from
+   * them without booting the app.
+   */
+  registerRoute(route: {
+    id: string;
+    method?: string;
+    path?: string;
+    transport: RouteTransport;
+    description?: string;
+    input?: {
+      readonly query?: Readonly<Record<string, unknown>>;
+      readonly body?: Readonly<Record<string, unknown>>;
+    };
+    output?: Readonly<Record<string, unknown>>;
+    streaming?: boolean;
+  }): void;
   /** Mark the pip as participating in a lifecycle hook. */
   registerLifecycleHook(hook: 'configure' | 'boot' | 'start' | 'stop' | 'dispose'): void;
   /** Append `provides` capability strings (informational, manifest-only). */
@@ -393,6 +410,17 @@ export type AnyPip = Pip<ServiceRecord, ServiceRecord>;
  * });
  * ```
  */
+/**
+ * A `boot` that returns `void` gives `TProvides` no inference candidate,
+ * and TypeScript then substitutes the CONSTRAINT (`ServiceRecord & …`,
+ * whose `keyof` is `string`) rather than the declared default. That wide
+ * record would poison the app builder's collision check for every later
+ * `.use()` — `keyof TAvail & string` is never empty. Detect the fallback
+ * by its tell (a full string index signature — no `pip()`-authored
+ * provides record has one) and collapse it to "provides nothing".
+ */
+export type InferredProvides<TP extends ServiceRecord> = string extends keyof TP ? EmptyShape : TP;
+
 export function pip<
   TShape extends NeedsShape & NoReservedKeys = EmptyShape,
   TProvides extends ServiceRecord & NoReservedKeys = EmptyShape,
@@ -405,7 +433,7 @@ export function pip<
   readonly start?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
   readonly stop?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
   readonly dispose?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;
-}): Pip<WireNeeds<TShape>, TProvides> {
+}): Pip<WireNeeds<TShape>, InferredProvides<TProvides>> {
   return {
     name: def.name,
     ...(def.version === undefined ? {} : { version: def.version }),

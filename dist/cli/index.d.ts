@@ -39,6 +39,8 @@ export type CliArgs = {
     observability?: boolean;
     /** `--graph` (honored by `explain` and `doctor`). */
     graph?: boolean;
+    /** `--openapi` (honored by `explain` only). */
+    openapi?: boolean;
 };
 /**
  * Parse argv into a typed shape. Exported so tests can exercise it without
@@ -52,6 +54,7 @@ export declare function parseArgs(argv: readonly string[]): CliArgs;
 export declare function runExplain(discovered: DiscoveredApp, opts: {
     json: boolean;
     graph?: boolean;
+    openapi?: boolean;
     out?: (line: string) => void;
     now?: () => Date;
 }): Promise<DotCliEnvelope<unknown>>;

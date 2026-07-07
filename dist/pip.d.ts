@@ -15,7 +15,7 @@
  * ```
  */
 export { isLazy, lazy, lazyOf, pip, provide, rename, service, token, DotPipError } from './pip-contract.js';
-export type { AnyPip, CtxOf, DotConfigureContext, EmptyShape, KernelCtx, Lazy, LazyService, NeedsShape, Pip, PipNeeds, PipProvides, RenamedProvides, Service, ServiceRecord, Token, WireNeeds, } from './pip-contract.js';
+export type { AnyPip, CtxOf, DotConfigureContext, EmptyShape, InferredProvides, KernelCtx, Lazy, LazyService, NeedsShape, Pip, PipNeeds, PipProvides, RenamedProvides, Service, ServiceRecord, Token, WireNeeds, } from './pip-contract.js';
 export { defineApp } from './define-app.js';
 export type { DotApp, DotAppBuilder, DotAppConfigured } from './define-app.js';
 export { testApp, bootTestApp } from './test-harness.js';

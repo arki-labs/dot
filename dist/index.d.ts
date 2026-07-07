@@ -12,7 +12,7 @@
 export { defineApp } from './define-app.js';
 export type { DotApp, DotAppBuilder, DotAppConfigured, UseGuard } from './define-app.js';
 export { isLazy, lazy, lazyOf, pip, provide, rename, service, token, DotPipError } from './pip-contract.js';
-export type { AnyPip, CtxOf, DotConfigureContext, EmptyShape, KernelCtx, Lazy, LazyService, NeedsShape, Pip, PipNeeds, PipProvides, RenamedProvides, Service, ServiceRecord, Token, WireNeeds, } from './pip-contract.js';
+export type { AnyPip, CtxOf, DotConfigureContext, EmptyShape, InferredProvides, KernelCtx, Lazy, LazyService, NeedsShape, Pip, PipNeeds, PipProvides, RenamedProvides, Service, ServiceRecord, Token, WireNeeds, } from './pip-contract.js';
 export { DotLifecycleError, DotLifecycleErrorCode, DOT_LIFECYCLE_HOOKS, } from './lifecycle.js';
 export type { DotLifecycleHook, DotLifecycleState, DotLifecyclePipFailure, DotLifecycleErrorCodeValue, } from './lifecycle.js';
 export type { DotAppManifest, PipManifest, RouteManifest, ServiceManifest, LifecycleManifest, DependencyEdge, DependencyEdgeKind, ServiceKind, RouteTransport, } from './manifest.js';
