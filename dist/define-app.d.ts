@@ -1,12 +1,12 @@
 /**
  * Public entry point for the DOT kernel (v2).
  *
- * `defineApp(name)` returns a `DotAppBuilder` that accumulates pips via
- * `.use(pip)`, then transitions through the 5-hook lifecycle:
+ * `defineApp(name)` returns a `DotAppBuilder` that accumulates plugins via
+ * `.use(plugin)`, then transitions through the 5-hook lifecycle:
  *
  *   defineApp -> use* -> configure() -> boot() -> start() -> stop() -> dispose()
  *
- * `.use()` is compile-time guarded: a pip whose `needs` are not satisfied
+ * `.use()` is compile-time guarded: a plugin whose `needs` are not satisfied
  * by services provided so far — or whose provides collide with existing
  * wire keys — fails to typecheck at the call site ("Expected 2 arguments,
  * but got 1", with the diagnostic embedded in the expected second
@@ -22,7 +22,7 @@ import type { DotDiagnosticsSnapshot } from './diagnostics.js';
 import type { DotLifecycleObserver } from './lifecycle-observer.js';
 import type { DotLifecycleState } from './lifecycle.js';
 import type { DotAppManifest } from './manifest.js';
-import type { EmptyShape, Pip, ServiceRecord } from './pip-contract.js';
+import type { AnyPlugin, EmptyShape, Plugin, ServiceRecord } from './plugin-contract.js';
 type MissingKeys<TAvail, TNeeds> = {
     readonly [K in Exclude<keyof TNeeds, keyof TAvail>]: TNeeds[K];
 };
@@ -33,27 +33,53 @@ type MismatchedKeys<TAvail, TNeeds> = {
     };
 };
 type NeedsError<TAvail extends ServiceRecord, TNeeds extends ServiceRecord> = {
-    readonly 'DOT: pip needs services no earlier .use() provides': {
+    readonly 'DOT: plugin needs services no earlier .use() provides': {
         readonly missing: MissingKeys<TAvail, TNeeds>;
         readonly mismatched: MismatchedKeys<TAvail, TNeeds>;
     };
 };
 type CollisionError<TAvail, TProvides> = {
-    readonly 'DOT: pip provides wire keys already provided (use rename())': keyof TAvail & keyof TProvides;
+    readonly 'DOT: plugin provides wire keys already provided (use rename())': keyof TAvail & keyof TProvides;
 };
 /**
- * A pip whose `boot` always throws infers `TProvides = never`, which would
+ * A plugin whose `boot` always throws infers `TProvides = never`, which would
  * poison both the collision check (`keyof never` matches everything) and
- * the accumulated record (`TAvail & never` = `never`). Such a pip provides
+ * the accumulated record (`TAvail & never` = `never`). Such a plugin provides
  * nothing — normalize to the empty shape.
  */
-type NormalizeProvides<TP extends ServiceRecord> = [TP] extends [never] ? EmptyShape : TP;
+export type NormalizeProvides<TP extends ServiceRecord> = [TP] extends [never] ? EmptyShape : TP;
 /**
- * Rest-tuple guard. Satisfied → `[]` (call `.use(pip)` with one argument).
+ * Rest-tuple guard. Satisfied → `[]` (call `.use(plugin)` with one argument).
  * Violated → a required second argument of an unconstructible error type,
  * so the call site fails with the diagnostic embedded in the expected type.
  */
 export type UseGuard<TAvail extends ServiceRecord, TNeeds extends ServiceRecord, TProvides extends ServiceRecord> = [TAvail] extends [TNeeds] ? [keyof TAvail & keyof TProvides] extends [never] ? [] : [error: CollisionError<TAvail, TProvides>] : [error: NeedsError<TAvail, TNeeds>];
+type UseAllState<TAvail extends ServiceRecord, TPlugins extends readonly AnyPlugin[]> = TPlugins extends readonly [
+    infer Head,
+    ...infer Tail
+] ? Head extends Plugin<infer TNeeds, infer TProvides> ? UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>> extends [] ? UseAllState<TAvail & NormalizeProvides<TProvides>, Extract<Tail, readonly AnyPlugin[]>> : {
+    readonly avail: TAvail;
+    readonly error: {
+        readonly 'DOT: useAll tuple contains a plugin that cannot be used at this position': UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>>[0];
+    };
+} : {
+    readonly avail: TAvail;
+    readonly error: {
+        readonly 'DOT: useAll accepts only plugins': Head;
+    };
+} : {
+    readonly avail: TAvail;
+    readonly error: never;
+};
+export type UseAllAvail<TAvail extends ServiceRecord, TPlugins extends readonly AnyPlugin[]> = UseAllState<TAvail, TPlugins>['avail'];
+type UseAllTupleGuard<TPlugins extends readonly AnyPlugin[]> = number extends TPlugins['length'] ? [
+    error: {
+        readonly 'DOT: useAll requires a tuple; add `as const` or pass plugins directly in declaration order': TPlugins;
+    }
+] : [];
+export type UseAllGuard<TAvail extends ServiceRecord, TPlugins extends readonly AnyPlugin[]> = [
+    UseAllState<TAvail, TPlugins>['error']
+] extends [never] ? UseAllTupleGuard<TPlugins> : [error: UseAllState<TAvail, TPlugins>['error']];
 /**
  * Public DotApp surface. The internal `DotAppImpl` implements this; consumers
  * see only these members.
@@ -64,7 +90,7 @@ export type DotApp<TServices extends ServiceRecord> = {
     /** Current lifecycle state. */
     readonly state: DotLifecycleState;
     /**
-     * Services published by booted pips, keyed by wire key.
+     * Services published by booted plugins, keyed by wire key.
      * Empty before `boot()` succeeds.
      */
     readonly services: TServices;
@@ -121,16 +147,22 @@ export type DotAppConfigured<TServices extends ServiceRecord> = {
 /**
  * Builder produced by `defineApp(name)`.
  *
- * `.use(pip)` is type-tracking in both directions: the pip's `needs` must
+ * `.use(plugin)` is type-tracking in both directions: the plugin's `needs` must
  * be satisfied by the services accumulated so far, and its `provides`
  * merge into the accumulated record for the next `.use()`.
  */
 export type DotAppBuilder<TAvail extends ServiceRecord> = {
     /**
-     * Register a pip. Compile error when the pip's needs are unsatisfied
+     * Register a plugin. Compile error when the plugin's needs are unsatisfied
      * or its provides collide with existing wire keys.
      */
-    use<TNeeds extends ServiceRecord, TProvides extends ServiceRecord>(pip: Pip<TNeeds, TProvides>, ...guard: UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>>): DotAppBuilder<TAvail & NormalizeProvides<TProvides>>;
+    use<TNeeds extends ServiceRecord, TProvides extends ServiceRecord>(plugin: Plugin<TNeeds, TProvides>, ...guard: UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>>): DotAppBuilder<TAvail & NormalizeProvides<TProvides>>;
+    /**
+     * Register a tuple of plugins in declaration order. This is type-equivalent
+     * to calling `.use()` for each item and keeps the same ordering/collision
+     * guard across the whole tuple.
+     */
+    useAll<const TPlugins extends readonly AnyPlugin[]>(plugins: TPlugins, ...guard: UseAllGuard<TAvail, TPlugins>): DotAppBuilder<UseAllAvail<TAvail, TPlugins>>;
     /** Run the configure phase synchronously. Throws on configure failure. */
     configure(): DotAppConfigured<TAvail>;
     /** Run configure + boot. Throws on configure or boot failure. */
@@ -143,8 +175,8 @@ export type DotAppBuilder<TAvail extends ServiceRecord> = {
  *
  * @example
  * const app = await defineApp('my-app')
- *   .use(dbPip)
- *   .use(billingPip)   // billing's needs must be satisfied by now
+ *   .use(dbPlugin)
+ *   .use(billingPlugin)   // billing's needs must be satisfied by now
  *   .boot();
  *
  * await app.start();
@@ -165,7 +197,7 @@ export declare function defineApp(name: string, options?: {
     /**
      * Watchdog budget (ms) for each async hook invocation (`boot`, `start`,
      * `stop`, `dispose` — `configure` is sync). A hook exceeding the budget
-     * fails with `DOT_LIFECYCLE_E015` naming the pip and hook, and the
+     * fails with `DOT_LIFECYCLE_E015` naming the plugin and hook, and the
      * kernel applies its normal failure rules (boot rollback, teardown
      * aggregation). The hook's promise itself cannot be cancelled — the
      * watchdog makes the hang *visible*, it does not kill it. Default:

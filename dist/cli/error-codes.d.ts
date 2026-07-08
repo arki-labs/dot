@@ -20,6 +20,14 @@ export declare const DotCliErrorCode: {
     readonly AppLifecycleFailed: "DOT_CLI_E006";
     /** `dot doctor --observability` ran but no OTel SDK is registered. */
     readonly ObservabilityNoSdk: "DOT_CLI_E007";
+    /** Requested projection format is not registered by the app. */
+    readonly ProjectionNotFound: "DOT_CLI_E008";
+    /** Projection module import failed or did not export `project`. */
+    readonly ProjectionImportFailed: "DOT_CLI_E009";
+    /** Projection execution failed or returned non-JSON output. */
+    readonly ProjectionExecutionFailed: "DOT_CLI_E010";
+    /** Multiple modules claim the same projection format. */
+    readonly ProjectionConflict: "DOT_CLI_E011";
 };
 export type DotCliErrorCodeValue = (typeof DotCliErrorCode)[keyof typeof DotCliErrorCode];
 /**

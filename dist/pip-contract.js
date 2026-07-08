@@ -142,6 +142,7 @@ export function pip(def) {
         name: def.name,
         ...(def.version === undefined ? {} : { version: def.version }),
         needs: def.needs ?? {},
+        actions: def.actions ?? [],
         renames: {},
         hooks: {
             ...(def.configure === undefined ? {} : { configure: def.configure }),

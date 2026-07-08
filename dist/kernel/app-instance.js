@@ -7,8 +7,9 @@
 import { Logger } from '@arki/log';
 import { createDebugLogger } from '@arki/log/debug';
 import { DotLifecycleError, DotLifecycleErrorCode } from '../lifecycle.js';
-import { isLazy, isLazyWitness, lazyOf } from '../pip-contract.js';
-import { withPhaseSpan, withPipHookSpan } from './otel.js';
+import { toJsonObject } from '../manifest.js';
+import { isLazy, isLazyWitness, lazyOf } from '../plugin-contract.js';
+import { withPhaseSpan, withPluginHookSpan } from './otel.js';
 const debugKernel = createDebugLogger('arki:dot:kernel');
 const DOCS_BASE = 'https://docs.arki.dev/dot/diagnostics';
 /** Resolve a needs-shape witness to its wire key. */
@@ -22,7 +23,7 @@ function makeIssue(args) {
     return {
         code: args.code,
         severity: args.severity ?? 'error',
-        pip: args.pip,
+        plugin: args.plugin,
         message: args.message,
         remediation: args.remediation,
         docsUrl: `${DOCS_BASE}#${args.docsAnchor}`,
@@ -37,7 +38,7 @@ export class DotAppImpl {
     #appName;
     #appVersion;
     #config;
-    /** Pips in declaration order — v2 boot order IS declaration order. */
+    /** Plugins in declaration order — v2 boot order IS declaration order. */
     #ordered;
     #records;
     /** Macro-state of the app. */
@@ -46,9 +47,9 @@ export class DotAppImpl {
     #hookTimeoutMs;
     /** Manifest finalised after `configure`. */
     #manifest;
-    /** Wire-keyed services map — populated as pips boot. */
+    /** Wire-keyed services map — populated as plugins boot. */
     #serviceMap = new Map();
-    /** Which pip provided each wire key — feeds dependency edges + collisions. */
+    /** Which plugin provided each wire key — feeds dependency edges + collisions. */
     #providerByWireKey = new Map();
     /** Dependency edges observed during boot (consumer → provider). */
     #wiringEdges = [];
@@ -77,7 +78,7 @@ export class DotAppImpl {
      * Structured lifecycle logger. One per app instance; named so consumers
      * can elevate it to DEBUG via `DEBUG=arki:dot:lifecycle` without
      * touching unrelated namespaces. Every line carries the app name plus
-     * any phase/pip attributes from the call site. The span helpers
+     * any phase/plugin attributes from the call site. The span helpers
      * (see `./otel.ts`) thread the active span's `traceId`+`spanId` onto
      * forked instances of this logger, so every log record is groupable
      * with its trace in any OTel-compatible backend.
@@ -99,47 +100,48 @@ export class DotAppImpl {
         this.#observers = new Set(config.observers);
         // Declaration order is boot order in v2. Duplicate names are surfaced at
         // construction (the `configure` phase pseudo-time).
-        debugKernel('[%s] registering %d pip(s) in declaration order', this.#appName, config.pips.length);
-        this.#ordered = [...config.pips];
+        debugKernel('[%s] registering %d plugin(s) in declaration order', this.#appName, config.plugins.length);
+        this.#ordered = [...config.plugins];
         this.#records = new Map();
-        for (const [order, pip] of this.#ordered.entries()) {
-            if (this.#records.has(pip.name)) {
+        for (const [order, plugin] of this.#ordered.entries()) {
+            if (this.#records.has(plugin.name)) {
                 throw new DotLifecycleError({
-                    code: DotLifecycleErrorCode.DuplicatePip,
+                    code: DotLifecycleErrorCode.DuplicatePlugin,
                     phase: 'configure',
-                    pip: pip.name,
-                    message: `Pip "${pip.name}" is registered twice`,
+                    plugin: plugin.name,
+                    message: `Plugin "${plugin.name}" is registered twice`,
                 });
             }
-            // `$` is the kernel context namespace ($app/$pip/$config). The pip()
+            // `$` is the kernel context namespace ($app/$plugin/$config). The plugin()
             // constraint bans these at compile time; this is the runtime backstop
-            // for erased pips and rename() targets, which types cannot see.
-            for (const alias of Object.keys(pip.needs)) {
+            // for erased plugins and rename() targets, which types cannot see.
+            for (const alias of Object.keys(plugin.needs)) {
                 if (alias.startsWith('$')) {
                     throw new DotLifecycleError({
                         code: DotLifecycleErrorCode.ReservedServiceKey,
                         phase: 'configure',
-                        pip: pip.name,
-                        message: `Pip "${pip.name}" declares needs alias "${alias}" — the "$" prefix is reserved ` +
-                            `for kernel context keys ($app, $pip, $config). Rename the alias.`,
+                        plugin: plugin.name,
+                        message: `Plugin "${plugin.name}" declares needs alias "${alias}" — the "$" prefix is reserved ` +
+                            `for kernel context keys ($app, $plugin, $config). Rename the alias.`,
                     });
                 }
             }
-            for (const [localKey, wireKey] of Object.entries(pip.renames)) {
+            for (const [localKey, wireKey] of Object.entries(plugin.renames)) {
                 if (wireKey.startsWith('$')) {
                     throw new DotLifecycleError({
                         code: DotLifecycleErrorCode.ReservedServiceKey,
                         phase: 'configure',
-                        pip: pip.name,
-                        message: `Pip "${pip.name}" renames "${localKey}" to "${wireKey}" — the "$" prefix is ` +
-                            `reserved for kernel context keys ($app, $pip, $config). Pick a different wire key.`,
+                        plugin: plugin.name,
+                        message: `Plugin "${plugin.name}" renames "${localKey}" to "${wireKey}" — the "$" prefix is ` +
+                            `reserved for kernel context keys ($app, $plugin, $config). Pick a different wire key.`,
                     });
                 }
             }
-            this.#records.set(pip.name, {
-                pip,
+            this.#records.set(plugin.name, {
+                plugin,
                 order,
-                routes: [],
+                actions: [],
+                projections: [],
                 services: [],
                 hooks: new Set(),
                 provides: new Set(),
@@ -199,13 +201,13 @@ export class DotAppImpl {
      * Emit a single hook-level event. Skipped (zero allocation) when no
      * observers are registered.
      */
-    #emitHook(phase, pip, order, status, opts) {
+    #emitHook(phase, plugin, order, status, opts) {
         if (this.#observers.size === 0)
             return;
         const event = {
-            kind: 'pip-hook',
+            kind: 'plugin-hook',
             phase,
-            pip,
+            plugin,
             order,
             status,
             appName: this.#appName,
@@ -214,6 +216,89 @@ export class DotAppImpl {
             ...(opts?.error === undefined ? {} : { error: opts.error }),
         };
         this.#emit(event);
+    }
+    #registerAction(record, action) {
+        let meta;
+        if (action.meta !== undefined) {
+            try {
+                meta = toJsonObject(action.meta);
+            }
+            catch (error) {
+                const issue = makeIssue({
+                    code: DotLifecycleErrorCode.ActionMetaNotJson,
+                    plugin: record.plugin.name,
+                    message: `action "${action.id}" for binding "${action.binding}" has metadata that is not JSON-round-trip safe: ` +
+                        stringifyError(error),
+                    remediation: 'Only put JSON-serializable data in action meta. Convert Dates to strings, remove functions/undefined fields, and avoid NaN/Infinity.',
+                    docsAnchor: 'action-meta-not-json',
+                    metadata: { actionId: action.id, binding: action.binding },
+                });
+                record.issues.push(issue);
+            }
+        }
+        const stamped = {
+            id: action.id,
+            plugin: record.plugin.name,
+            binding: action.binding,
+            direction: action.direction,
+            ...(action.address === undefined ? {} : { address: action.address }),
+            ...(action.summary === undefined ? {} : { summary: action.summary }),
+            ...(meta === undefined ? {} : { meta }),
+            ...(action.metaSchema === undefined ? {} : { metaSchema: action.metaSchema }),
+        };
+        for (const existingRecord of this.#records.values()) {
+            const duplicate = existingRecord.actions.find(existing => existing.binding === stamped.binding && existing.id === stamped.id);
+            if (duplicate === undefined)
+                continue;
+            const issue = makeIssue({
+                code: DotLifecycleErrorCode.DuplicateAction,
+                plugin: record.plugin.name,
+                message: `action "${stamped.id}" is registered more than once for binding "${stamped.binding}".`,
+                remediation: 'Action ids must be unique within a binding. Rename one action or move one of them to a different binding.',
+                docsAnchor: 'duplicate-action',
+                metadata: { binding: stamped.binding, id: stamped.id, firstPlugin: duplicate.plugin },
+            });
+            record.issues.push(issue);
+            break;
+        }
+        record.actions.push(stamped);
+    }
+    #registerProjection(record, projection) {
+        record.projections.push({ ...projection, plugin: record.plugin.name });
+    }
+    #registerRouteShim(record, route) {
+        const meta = {};
+        if (route.method !== undefined)
+            meta['method'] = route.method;
+        if (route.path !== undefined)
+            meta['path'] = route.path;
+        if (route.input !== undefined) {
+            const input = {};
+            if (route.input.query !== undefined)
+                input['query'] = route.input.query;
+            if (route.input.body !== undefined)
+                input['body'] = route.input.body;
+            if (Object.keys(input).length > 0)
+                meta['input'] = input;
+        }
+        if (route.output !== undefined)
+            meta['output'] = route.output;
+        if (route.streaming !== undefined)
+            meta['streaming'] = route.streaming;
+        this.#registerAction(record, {
+            id: route.id,
+            binding: route.transport,
+            direction: 'in',
+            ...(route.path === undefined ? {} : { address: `${route.method ?? 'GET'} ${route.path}` }),
+            ...(route.description === undefined ? {} : { summary: route.description }),
+            ...(Object.keys(meta).length === 0 ? {} : { meta }),
+        });
+    }
+    #actionFromSource(source) {
+        if (hasToDotAction(source)) {
+            return source.toDotAction();
+        }
+        return source;
     }
     /**
      * Wrap a sync phase body with starting/completed/failed observer events.
@@ -314,12 +399,12 @@ export class DotAppImpl {
             throw this.#reuseError('configure');
         }
         const phaseLogger = this.#logger.withAttribute('dot.app.phase', 'configure');
-        phaseLogger.debug('configure: starting', { 'dot.app.pip.count': this.#ordered.length });
+        phaseLogger.debug('configure: starting', { 'dot.app.plugin.count': this.#ordered.length });
         this.#withPhaseEmit('configure', () => {
             withPhaseSpan({
                 appName: this.#appName,
                 phase: 'configure',
-                pipCount: this.#ordered.length,
+                pluginCount: this.#ordered.length,
                 logger: phaseLogger,
             }, () => this.#runConfigureInner(phaseLogger));
         });
@@ -330,23 +415,57 @@ export class DotAppImpl {
      * intricate error-handling readable.
      */
     #runConfigureInner(phaseLogger) {
-        for (const pip of this.#ordered) {
-            const record = this.#records.get(pip.name);
-            const pipLogger = phaseLogger.withAttribute('dot.pip.name', pip.name);
-            if (!pip.hooks.configure) {
-                pipLogger.debug('configure: skipped (no hook)');
+        for (const plugin of this.#ordered) {
+            const record = this.#records.get(plugin.name);
+            const pluginLogger = phaseLogger.withAttribute('dot.plugin.name', plugin.name);
+            const declaredStarted = performance.now();
+            try {
+                for (const source of plugin.actions)
+                    this.#registerAction(record, this.#actionFromSource(source));
+            }
+            catch (error) {
+                const durationMs = performance.now() - declaredStarted;
+                const issue = makeIssue({
+                    code: DotLifecycleErrorCode.ConfigureFailed,
+                    plugin: plugin.name,
+                    message: `action declaration threw for plugin "${plugin.name}": ${stringifyError(error)}`,
+                    remediation: `Fix the action declarations of "${plugin.name}". Declarative actions must be static and synchronous.`,
+                    docsAnchor: 'configure-failed',
+                });
+                record.issues.push(issue);
+                record.lifecycleDiagnostics.push({
+                    plugin: plugin.name,
+                    hook: 'configure',
+                    state: 'failed',
+                    order: record.order,
+                    durationMs,
+                    issues: [issue],
+                });
+                this.#emitHook('configure', plugin.name, record.order, 'failed', { durationMs, error });
+                this.#state = 'failed';
+                this.#manifest = this.#buildManifest();
+                throw new DotLifecycleError({
+                    code: DotLifecycleErrorCode.ConfigureFailed,
+                    phase: 'configure',
+                    plugin: plugin.name,
+                    message: issue.message,
+                    cause: error,
+                });
+            }
+            if (!plugin.hooks.configure) {
+                pluginLogger.debug('configure: skipped (no hook)');
                 continue;
             }
             record.hooks.add('configure');
             const ctx = {
-                pipName: pip.name,
+                pluginName: plugin.name,
                 appName: this.#appName,
                 registerService: (name, kind) => {
-                    record.services.push({ name, pip: pip.name, kind });
+                    record.services.push({ name, plugin: plugin.name, kind });
                 },
-                registerRoute: route => {
-                    record.routes.push({ ...route, pip: pip.name });
-                },
+                registerAction: action => this.#registerAction(record, action),
+                registerProjection: projection => this.#registerProjection(record, projection),
+                registerRoute: route => this.#registerRouteShim(record, route),
                 registerLifecycleHook: hook => {
                     record.hooks.add(hook);
                 },
@@ -356,43 +475,43 @@ export class DotAppImpl {
                 },
             };
             const started = performance.now();
-            this.#emitHook('configure', pip.name, record.order, 'starting');
+            this.#emitHook('configure', plugin.name, record.order, 'starting');
             let returned;
             try {
-                returned = withPipHookSpan({
+                returned = withPluginHookSpan({
                     appName: this.#appName,
-                    pipName: pip.name,
-                    pipVersion: pip.version,
+                    pluginName: plugin.name,
+                    pluginVersion: plugin.version,
                     hook: 'configure',
                     order: record.order,
-                    logger: pipLogger,
-                }, () => pip.hooks.configure(ctx));
+                    logger: pluginLogger,
+                }, () => plugin.hooks.configure(ctx));
             }
             catch (error) {
                 const durationMs = performance.now() - started;
                 const issue = makeIssue({
                     code: DotLifecycleErrorCode.ConfigureFailed,
-                    pip: pip.name,
-                    message: `configure hook threw for pip "${pip.name}": ${stringifyError(error)}`,
-                    remediation: `Fix the error in the configure() hook of "${pip.name}". configure() is for synchronous registration only — avoid throwing on declarative work.`,
+                    plugin: plugin.name,
+                    message: `configure hook threw for plugin "${plugin.name}": ${stringifyError(error)}`,
+                    remediation: `Fix the error in the configure() hook of "${plugin.name}". configure() is for synchronous registration only — avoid throwing on declarative work.`,
                     docsAnchor: 'configure-failed',
                 });
                 record.issues.push(issue);
                 record.lifecycleDiagnostics.push({
-                    pip: pip.name,
+                    plugin: plugin.name,
                     hook: 'configure',
                     state: 'failed',
                     order: record.order,
                     durationMs,
                     issues: [issue],
                 });
-                this.#emitHook('configure', pip.name, record.order, 'failed', { durationMs, error });
+                this.#emitHook('configure', plugin.name, record.order, 'failed', { durationMs, error });
                 this.#state = 'failed';
                 this.#manifest = this.#buildManifest();
                 throw new DotLifecycleError({
                     code: DotLifecycleErrorCode.ConfigureFailed,
                     phase: 'configure',
-                    pip: pip.name,
+                    plugin: plugin.name,
                     message: issue.message,
                     cause: error,
                 });
@@ -401,21 +520,21 @@ export class DotAppImpl {
                 const durationMs = performance.now() - started;
                 const issue = makeIssue({
                     code: DotLifecycleErrorCode.ConfigureAsync,
-                    pip: pip.name,
-                    message: `configure hook of pip "${pip.name}" returned a Promise. configure must be synchronous.`,
+                    plugin: plugin.name,
+                    message: `configure hook of plugin "${plugin.name}" returned a Promise. configure must be synchronous.`,
                     remediation: 'Move async work to the boot() hook. configure() is for synchronous registration only.',
                     docsAnchor: 'configure-async',
                 });
                 record.issues.push(issue);
                 record.lifecycleDiagnostics.push({
-                    pip: pip.name,
+                    plugin: plugin.name,
                     hook: 'configure',
                     state: 'failed',
                     order: record.order,
                     durationMs,
                     issues: [issue],
                 });
-                this.#emitHook('configure', pip.name, record.order, 'failed', {
+                this.#emitHook('configure', plugin.name, record.order, 'failed', {
                     durationMs,
                     error: new Error(issue.message),
                 });
@@ -424,39 +543,39 @@ export class DotAppImpl {
                 throw new DotLifecycleError({
                     code: DotLifecycleErrorCode.ConfigureAsync,
                     phase: 'configure',
-                    pip: pip.name,
+                    plugin: plugin.name,
                     message: issue.message,
                 });
             }
             const durationMs = performance.now() - started;
             record.lifecycleDiagnostics.push({
-                pip: pip.name,
+                plugin: plugin.name,
                 hook: 'configure',
                 state: 'configured',
                 order: record.order,
                 durationMs,
                 issues: [],
             });
-            this.#emitHook('configure', pip.name, record.order, 'completed', { durationMs });
-            pipLogger.debug('configure: done', { 'dot.pip.duration.ms': durationMs });
+            this.#emitHook('configure', plugin.name, record.order, 'completed', { durationMs });
+            pluginLogger.debug('configure: done', { 'dot.plugin.duration.ms': durationMs });
         }
         // Also declare lifecycle-hook participation for non-configure hooks present
-        // on the pip object, so the manifest reflects them.
-        for (const pip of this.#ordered) {
-            const record = this.#records.get(pip.name);
-            if (pip.hooks.boot)
+        // on the plugin object, so the manifest reflects them.
+        for (const plugin of this.#ordered) {
+            const record = this.#records.get(plugin.name);
+            if (plugin.hooks.boot)
                 record.hooks.add('boot');
-            if (pip.hooks.start)
+            if (plugin.hooks.start)
                 record.hooks.add('start');
-            if (pip.hooks.stop)
+            if (plugin.hooks.stop)
                 record.hooks.add('stop');
-            if (pip.hooks.dispose)
+            if (plugin.hooks.dispose)
                 record.hooks.add('dispose');
         }
         this.#configured = true;
         this.#state = 'configured';
         this.#manifest = this.#buildManifest();
-        phaseLogger.debug('configure: complete', { 'dot.app.pip.count': this.#ordered.length });
+        phaseLogger.debug('configure: complete', { 'dot.app.plugin.count': this.#ordered.length });
     }
     /**
      * Run one lifecycle transition after all previously enqueued ones.
@@ -495,42 +614,42 @@ export class DotAppImpl {
             this.runConfigure();
         }
         const phaseLogger = this.#logger.withAttribute('dot.app.phase', 'boot');
-        phaseLogger.debug('boot: starting', { 'dot.app.pip.count': this.#ordered.length });
+        phaseLogger.debug('boot: starting', { 'dot.app.plugin.count': this.#ordered.length });
         return this.#withPhaseEmitAsync('boot', () => withPhaseSpan({
             appName: this.#appName,
             phase: 'boot',
-            pipCount: this.#ordered.length,
+            pluginCount: this.#ordered.length,
             logger: phaseLogger,
         }, () => this.#runBootInner(phaseLogger)));
     }
     /**
-     * Resolve a pip's needs into a hook context (alias-keyed), joined with
-     * the `$`-prefixed kernel keys and — for post-boot hooks — the pip's own
+     * Resolve a plugin's needs into a hook context (alias-keyed), joined with
+     * the `$`-prefixed kernel keys and — for post-boot hooks — the plugin's own
      * published services (local keys).
      *
      * @throws {DotLifecycleError} `DOT_LIFECYCLE_E012` when a need has no
-     *   provider among earlier-booted pips. Teardown hooks can never hit
+     *   provider among earlier-booted plugins. Teardown hooks can never hit
      *   this: the service map only grows, and reverse-order teardown keeps
      *   providers alive until their consumers are done.
      */
     #buildHookCtx(record, phase, includeOwnProvides) {
         const ctx = {
             $app: this.#appName,
-            $pip: record.pip.name,
+            $plugin: record.plugin.name,
             $config: this.#config,
         };
-        for (const [alias, witness] of Object.entries(record.pip.needs)) {
+        for (const [alias, witness] of Object.entries(record.plugin.needs)) {
             const wireKey = wireKeyOf(witness, alias);
             if (!this.#serviceMap.has(wireKey)) {
                 throw new DotLifecycleError({
                     code: DotLifecycleErrorCode.UnsatisfiedNeed,
                     phase,
-                    pip: record.pip.name,
-                    message: `Pip "${record.pip.name}" needs service "${wireKey}" but no earlier pip provides it. ` +
-                        `Register a provider with .use() before this pip. Services flow strictly forward — ` +
-                        `if a later pip provides "${wireKey}", move that provider earlier; if two pips need ` +
+                    plugin: record.plugin.name,
+                    message: `Plugin "${record.plugin.name}" needs service "${wireKey}" but no earlier plugin provides it. ` +
+                        `Register a provider with .use() before this plugin. Services flow strictly forward — ` +
+                        `if a later plugin provides "${wireKey}", move that provider earlier; if two plugins need ` +
                         `each other's services, that is a cycle: merge them or extract the shared piece into ` +
-                        `a third pip both consume.`,
+                        `a third plugin both consume.`,
                 });
             }
             const value = this.#serviceMap.get(wireKey);
@@ -541,8 +660,8 @@ export class DotAppImpl {
             // the underlying value's lifecycle stays with its provider.
             ctx[alias] = isLazyWitness(witness) && !isLazy(value) ? lazyOf(value) : value;
             const provider = this.#providerByWireKey.get(wireKey);
-            if (provider !== undefined && !this.#wiringEdges.some(e => e.from === record.pip.name && e.to === provider)) {
-                this.#wiringEdges.push({ from: record.pip.name, to: provider, kind: 'requires' });
+            if (provider !== undefined && !this.#wiringEdges.some(e => e.from === record.plugin.name && e.to === provider)) {
+                this.#wiringEdges.push({ from: record.plugin.name, to: provider, kind: 'requires' });
             }
         }
         if (includeOwnProvides) {
@@ -553,13 +672,13 @@ export class DotAppImpl {
     /**
      * Race one hook invocation against the app's `hookTimeoutMs` watchdog.
      * No budget configured → plain pass-through. On timeout the returned
-     * promise rejects with `DOT_LIFECYCLE_E015` naming the pip and hook,
+     * promise rejects with `DOT_LIFECYCLE_E015` naming the plugin and hook,
      * and the call site's existing catch path applies the phase's normal
      * failure rules (boot rollback, start cascade, teardown aggregation).
      * The hook's own promise cannot be cancelled — the watchdog makes a
      * hang visible and bounded; it does not kill the hung work.
      */
-    async #withHookBudget(pipName, hook, run) {
+    async #withHookBudget(pluginName, hook, run) {
         const budget = this.#hookTimeoutMs;
         if (budget === undefined)
             return run();
@@ -569,8 +688,8 @@ export class DotAppImpl {
                 reject(new DotLifecycleError({
                     code: DotLifecycleErrorCode.HookTimeout,
                     phase: hook,
-                    pip: pipName,
-                    message: `${hook} hook of pip "${pipName}" exceeded the ${budget.toString()}ms hookTimeoutMs watchdog. ` +
+                    plugin: pluginName,
+                    message: `${hook} hook of plugin "${pluginName}" exceeded the ${budget.toString()}ms hookTimeoutMs watchdog. ` +
                         `The kernel treats the hook as failed and applies its normal rollback/aggregation rules, but ` +
                         `cannot cancel the hook's promise — find the hang (a missing await? a connection that never ` +
                         `settles?) or raise the budget in defineApp(name, { hookTimeoutMs }).`,
@@ -598,26 +717,26 @@ export class DotAppImpl {
         const fail = async (args) => {
             const issue = makeIssue({
                 code: args.code,
-                pip: args.record.pip.name,
+                plugin: args.record.plugin.name,
                 message: args.message,
                 remediation: args.remediation,
                 docsAnchor: args.docsAnchor,
             });
             args.record.issues.push(issue);
             args.record.lifecycleDiagnostics.push({
-                pip: args.record.pip.name,
+                plugin: args.record.plugin.name,
                 hook: 'boot',
                 state: 'failed',
                 order: args.record.order,
                 durationMs: args.durationMs,
                 issues: [issue],
             });
-            this.#emitHook('boot', args.record.pip.name, args.record.order, 'failed', {
+            this.#emitHook('boot', args.record.plugin.name, args.record.order, 'failed', {
                 durationMs: args.durationMs,
                 error: args.cause ?? new Error(args.message),
             });
-            phaseLogger.error('boot: FAILED — rolling back already-booted pips', {
-                'dot.pip.name': args.record.pip.name,
+            phaseLogger.error('boot: FAILED — rolling back already-booted plugins', {
+                'dot.plugin.name': args.record.plugin.name,
                 'dot.app.rollback.count': args.rollback.length,
             });
             const disposeFailures = await this.#runDisposeForRecords(reverseRecords(args.rollback), phaseLogger);
@@ -626,17 +745,17 @@ export class DotAppImpl {
             throw new DotLifecycleError({
                 code: args.code,
                 phase: 'boot',
-                pip: args.record.pip.name,
+                plugin: args.record.plugin.name,
                 message: args.message,
                 cause: args.cause,
                 failures: disposeFailures.length > 0 ? disposeFailures : undefined,
             });
         };
-        for (const pip of this.#ordered) {
-            const record = this.#records.get(pip.name);
-            const pipLogger = phaseLogger.withAttribute('dot.pip.name', pip.name);
+        for (const plugin of this.#ordered) {
+            const record = this.#records.get(plugin.name);
+            const pluginLogger = phaseLogger.withAttribute('dot.plugin.name', plugin.name);
             const started = performance.now();
-            // Resolve needs BEFORE invoking the hook — a pip with needs but no
+            // Resolve needs BEFORE invoking the hook — a plugin with needs but no
             // boot hook still fails fast when its wiring is unsatisfied.
             let ctx;
             try {
@@ -648,36 +767,36 @@ export class DotAppImpl {
                     record,
                     code: DotLifecycleErrorCode.UnsatisfiedNeed,
                     message,
-                    remediation: `Add a provider for the missing service with .use() before "${pip.name}", or rename an ` +
-                        `existing provider's keys to match. If a later pip provides it, reorder — services flow ` +
-                        `strictly forward. Mutual needs between two pips are a cycle: merge them or extract the ` +
-                        `shared piece into a third pip both consume.`,
+                    remediation: `Add a provider for the missing service with .use() before "${plugin.name}", or rename an ` +
+                        `existing provider's keys to match. If a later plugin provides it, reorder — services flow ` +
+                        `strictly forward. Mutual needs between two plugins are a cycle: merge them or extract the ` +
+                        `shared piece into a third plugin both consume.`,
                     docsAnchor: 'unsatisfied-need',
                     durationMs: performance.now() - started,
                     rollback: bootedRecords,
                 });
             }
-            if (!pip.hooks.boot) {
+            if (!plugin.hooks.boot) {
                 record.booted = true;
                 bootedRecords.push(record);
-                pipLogger.debug('boot: skipped (no hook)');
+                pluginLogger.debug('boot: skipped (no hook)');
                 continue;
             }
             record.hooks.add('boot');
-            this.#emitHook('boot', pip.name, record.order, 'starting');
+            this.#emitHook('boot', plugin.name, record.order, 'starting');
             let result;
             try {
-                result = await this.#withHookBudget(pip.name, 'boot', () => withPipHookSpan({
+                result = await this.#withHookBudget(plugin.name, 'boot', () => withPluginHookSpan({
                     appName: this.#appName,
-                    pipName: pip.name,
-                    pipVersion: pip.version,
+                    pluginName: plugin.name,
+                    pluginVersion: plugin.version,
                     hook: 'boot',
                     order: record.order,
-                    logger: pipLogger,
+                    logger: pluginLogger,
                 }, 
                 // Erasure boundary: hooks are stored as `(ctx: never) => ...`;
                 // the kernel is the one caller allowed to cross it.
-                () => pip.hooks.boot(ctx)));
+                () => plugin.hooks.boot(ctx)));
             }
             catch (error) {
                 const timedOut = error instanceof DotLifecycleError && error.code === DotLifecycleErrorCode.HookTimeout;
@@ -686,10 +805,10 @@ export class DotAppImpl {
                     code: timedOut ? DotLifecycleErrorCode.HookTimeout : DotLifecycleErrorCode.BootFailed,
                     message: timedOut
                         ? error.message
-                        : `boot hook threw for pip "${pip.name}": ${stringifyError(error)}`,
+                        : `boot hook threw for plugin "${plugin.name}": ${stringifyError(error)}`,
                     remediation: timedOut
-                        ? `Find the hang in the boot() hook of "${pip.name}" — a missing await or a connection that never settles — or raise defineApp's hookTimeoutMs.`
-                        : `Fix the error in the boot() hook of "${pip.name}". If boot opens partial resources before throwing, clean them up locally — DOT only disposes pips whose boot completed.`,
+                        ? `Find the hang in the boot() hook of "${plugin.name}" — a missing await or a connection that never settles — or raise defineApp's hookTimeoutMs.`
+                        : `Fix the error in the boot() hook of "${plugin.name}". If boot opens partial resources before throwing, clean them up locally — DOT only disposes plugins whose boot completed.`,
                     docsAnchor: timedOut ? 'hook-timeout' : 'boot-failed',
                     durationMs: performance.now() - started,
                     cause: error,
@@ -700,17 +819,17 @@ export class DotAppImpl {
             record.publishedServices = publishedServices;
             record.booted = true;
             for (const [localKey, value] of Object.entries(publishedServices)) {
-                const wireKey = pip.renames[localKey] ?? localKey;
+                const wireKey = plugin.renames[localKey] ?? localKey;
                 if (localKey.startsWith('$') || wireKey.startsWith('$')) {
-                    // The pip() constraint bans this at compile time; erased pips can
-                    // still reach here. A `$` publish would shadow $app/$pip/$config
-                    // in the pip's own post-boot hook contexts.
+                    // The plugin() constraint bans this at compile time; erased plugins can
+                    // still reach here. A `$` publish would shadow $app/$plugin/$config
+                    // in the plugin's own post-boot hook contexts.
                     return fail({
                         record,
                         code: DotLifecycleErrorCode.ReservedServiceKey,
-                        message: `Pip "${pip.name}" publishes service "${wireKey}" — the "$" prefix is reserved ` +
-                            `for kernel context keys ($app, $pip, $config).`,
-                        remediation: `Rename the "${wireKey}" key returned from the boot() hook of "${pip.name}" — "$"-prefixed keys would shadow the kernel context.`,
+                        message: `Plugin "${plugin.name}" publishes service "${wireKey}" — the "$" prefix is reserved ` +
+                            `for kernel context keys ($app, $plugin, $config).`,
+                        remediation: `Rename the "${wireKey}" key returned from the boot() hook of "${plugin.name}" — "$"-prefixed keys would shadow the kernel context.`,
                         docsAnchor: 'reserved-service-key',
                         durationMs: performance.now() - started,
                         rollback: [...bootedRecords, record],
@@ -718,41 +837,41 @@ export class DotAppImpl {
                 }
                 if (this.#serviceMap.has(wireKey)) {
                     const owner = this.#providerByWireKey.get(wireKey) ?? 'unknown';
-                    // The current pip HAS booted — include it in the rollback.
+                    // The current plugin HAS booted — include it in the rollback.
                     return fail({
                         record,
                         code: DotLifecycleErrorCode.ServiceCollision,
-                        message: `Pip "${pip.name}" publishes service "${wireKey}" which pip "${owner}" already provides.`,
-                        remediation: `Mount one of the two with rename(pip, { '${wireKey}': '<newKey>' }) to keep both instances, or remove the duplicate provider.`,
+                        message: `Plugin "${plugin.name}" publishes service "${wireKey}" which plugin "${owner}" already provides.`,
+                        remediation: `Mount one of the two with rename(plugin, { '${wireKey}': '<newKey>' }) to keep both instances, or remove the duplicate provider.`,
                         docsAnchor: 'service-collision',
                         durationMs: performance.now() - started,
                         rollback: [...bootedRecords, record],
                     });
                 }
                 this.#serviceMap.set(wireKey, value);
-                this.#providerByWireKey.set(wireKey, pip.name);
+                this.#providerByWireKey.set(wireKey, plugin.name);
                 this.#aggregatedServices[wireKey] = value;
                 record.provides.add(wireKey);
             }
             bootedRecords.push(record);
             const durationMs = performance.now() - started;
             record.lifecycleDiagnostics.push({
-                pip: pip.name,
+                plugin: plugin.name,
                 hook: 'boot',
                 state: 'booted',
                 order: record.order,
                 durationMs,
                 issues: [],
             });
-            this.#emitHook('boot', pip.name, record.order, 'completed', { durationMs });
-            pipLogger.debug('boot: done', {
-                'dot.pip.duration.ms': durationMs,
-                'dot.pip.services.published': Object.keys(publishedServices).length,
+            this.#emitHook('boot', plugin.name, record.order, 'completed', { durationMs });
+            pluginLogger.debug('boot: done', {
+                'dot.plugin.duration.ms': durationMs,
+                'dot.plugin.services.published': Object.keys(publishedServices).length,
             });
         }
         this.#state = 'booted';
         this.#manifest = this.#buildManifest();
-        phaseLogger.debug('boot: complete', { 'dot.app.pip.count': this.#ordered.length });
+        phaseLogger.debug('boot: complete', { 'dot.app.plugin.count': this.#ordered.length });
     }
     /** Public start(). Boots first if needed. Idempotent + concurrent-safe. */
     async start() {
@@ -778,11 +897,11 @@ export class DotAppImpl {
         }
         // From booted or stopped, run start hooks.
         const phaseLogger = this.#logger.withAttribute('dot.app.phase', 'start');
-        phaseLogger.debug('start: starting', { 'dot.app.pip.count': this.#ordered.length });
+        phaseLogger.debug('start: starting', { 'dot.app.plugin.count': this.#ordered.length });
         return this.#withPhaseEmitAsync('start', () => withPhaseSpan({
             appName: this.#appName,
             phase: 'start',
-            pipCount: this.#ordered.length,
+            pluginCount: this.#ordered.length,
             logger: phaseLogger,
         }, () => this.#runStartInner(phaseLogger)));
     }
@@ -792,52 +911,52 @@ export class DotAppImpl {
      */
     async #runStartInner(phaseLogger) {
         const startedRecords = [];
-        for (const pip of this.#ordered) {
-            const record = this.#records.get(pip.name);
-            const pipLogger = phaseLogger.withAttribute('dot.pip.name', pip.name);
-            if (!pip.hooks.start) {
-                pipLogger.debug('start: skipped (no hook)');
+        for (const plugin of this.#ordered) {
+            const record = this.#records.get(plugin.name);
+            const pluginLogger = phaseLogger.withAttribute('dot.plugin.name', plugin.name);
+            if (!plugin.hooks.start) {
+                pluginLogger.debug('start: skipped (no hook)');
                 continue;
             }
             record.hooks.add('start');
             const ctx = this.#buildHookCtx(record, 'start', true);
             const startedAt = performance.now();
-            this.#emitHook('start', pip.name, record.order, 'starting');
+            this.#emitHook('start', plugin.name, record.order, 'starting');
             try {
-                await this.#withHookBudget(pip.name, 'start', () => withPipHookSpan({
+                await this.#withHookBudget(plugin.name, 'start', () => withPluginHookSpan({
                     appName: this.#appName,
-                    pipName: pip.name,
-                    pipVersion: pip.version,
+                    pluginName: plugin.name,
+                    pluginVersion: plugin.version,
                     hook: 'start',
                     order: record.order,
-                    logger: pipLogger,
-                }, () => pip.hooks.start(ctx)));
+                    logger: pluginLogger,
+                }, () => plugin.hooks.start(ctx)));
             }
             catch (error) {
                 const durationMs = performance.now() - startedAt;
                 const timedOut = error instanceof DotLifecycleError && error.code === DotLifecycleErrorCode.HookTimeout;
                 const issue = makeIssue({
                     code: timedOut ? DotLifecycleErrorCode.HookTimeout : DotLifecycleErrorCode.StartFailed,
-                    pip: pip.name,
+                    plugin: plugin.name,
                     message: timedOut
                         ? error.message
-                        : `start hook threw for pip "${pip.name}": ${stringifyError(error)}`,
+                        : `start hook threw for plugin "${plugin.name}": ${stringifyError(error)}`,
                     remediation: timedOut
-                        ? `Find the hang in the start() hook of "${pip.name}" — or raise defineApp's hookTimeoutMs. DOT rolls back as for any start failure.`
-                        : `Fix the error in the start() hook of "${pip.name}". DOT will stop all already-started pips and dispose all booted pips in reverse order.`,
+                        ? `Find the hang in the start() hook of "${plugin.name}" — or raise defineApp's hookTimeoutMs. DOT rolls back as for any start failure.`
+                        : `Fix the error in the start() hook of "${plugin.name}". DOT will stop all already-started plugins and dispose all booted plugins in reverse order.`,
                     docsAnchor: timedOut ? 'hook-timeout' : 'start-failed',
                 });
                 record.issues.push(issue);
                 record.lifecycleDiagnostics.push({
-                    pip: pip.name,
+                    plugin: plugin.name,
                     hook: 'start',
                     state: 'failed',
                     order: record.order,
                     durationMs,
                     issues: [issue],
                 });
-                this.#emitHook('start', pip.name, record.order, 'failed', { durationMs, error });
-                pipLogger.error('start: FAILED — rolling back', {
+                this.#emitHook('start', plugin.name, record.order, 'failed', { durationMs, error });
+                pluginLogger.error('start: FAILED — rolling back', {
                     'dot.app.rollback.started.count': startedRecords.length,
                 });
                 const stopFailures = await this.#runStopForRecords(reverseRecords(startedRecords), phaseLogger);
@@ -849,7 +968,7 @@ export class DotAppImpl {
                 throw new DotLifecycleError({
                     code: timedOut ? DotLifecycleErrorCode.HookTimeout : DotLifecycleErrorCode.StartFailed,
                     phase: 'start',
-                    pip: pip.name,
+                    plugin: plugin.name,
                     message: issue.message,
                     cause: error,
                     failures: failures.length > 0 ? failures : undefined,
@@ -859,19 +978,19 @@ export class DotAppImpl {
             startedRecords.push(record);
             const durationMs = performance.now() - startedAt;
             record.lifecycleDiagnostics.push({
-                pip: pip.name,
+                plugin: plugin.name,
                 hook: 'start',
                 state: 'started',
                 order: record.order,
                 durationMs,
                 issues: [],
             });
-            this.#emitHook('start', pip.name, record.order, 'completed', { durationMs });
-            pipLogger.debug('start: done', { 'dot.pip.duration.ms': durationMs });
+            this.#emitHook('start', plugin.name, record.order, 'completed', { durationMs });
+            pluginLogger.debug('start: done', { 'dot.plugin.duration.ms': durationMs });
         }
         this.#state = 'started';
         this.#manifest = this.#buildManifest();
-        phaseLogger.debug('start: complete', { 'dot.app.pip.count': this.#ordered.length });
+        phaseLogger.debug('start: complete', { 'dot.app.plugin.count': this.#ordered.length });
     }
     /** Public stop(). Idempotent + concurrent-safe. */
     async stop() {
@@ -901,11 +1020,11 @@ export class DotAppImpl {
     }
     async #runStop() {
         const phaseLogger = this.#logger.withAttribute('dot.app.phase', 'stop');
-        phaseLogger.debug('stop: starting', { 'dot.app.pip.count': this.#ordered.length });
+        phaseLogger.debug('stop: starting', { 'dot.app.plugin.count': this.#ordered.length });
         return this.#withPhaseEmitAsync('stop', () => withPhaseSpan({
             appName: this.#appName,
             phase: 'stop',
-            pipCount: this.#ordered.length,
+            pluginCount: this.#ordered.length,
             logger: phaseLogger,
         }, async () => {
             const startedRecords = this.#ordered.map(p => this.#records.get(p.name)).filter(r => r.started);
@@ -917,67 +1036,67 @@ export class DotAppImpl {
                 throw new DotLifecycleError({
                     code: DotLifecycleErrorCode.StopFailed,
                     phase: 'stop',
-                    message: `${failures.length} pip(s) failed during stop`,
+                    message: `${failures.length} plugin(s) failed during stop`,
                     failures,
                 });
             }
-            phaseLogger.debug('stop: complete', { 'dot.app.pip.count': this.#ordered.length });
+            phaseLogger.debug('stop: complete', { 'dot.app.plugin.count': this.#ordered.length });
         }));
     }
     async #runStopForRecords(records, phaseLogger) {
         const failures = [];
         for (const record of records) {
-            if (!record.pip.hooks.stop)
+            if (!record.plugin.hooks.stop)
                 continue;
-            const pipLogger = phaseLogger.withAttribute('dot.pip.name', record.pip.name);
+            const pluginLogger = phaseLogger.withAttribute('dot.plugin.name', record.plugin.name);
             record.hooks.add('stop');
             const ctx = this.#buildHookCtx(record, 'stop', true);
             const startedAt = performance.now();
-            this.#emitHook('stop', record.pip.name, record.order, 'starting');
+            this.#emitHook('stop', record.plugin.name, record.order, 'starting');
             try {
-                await this.#withHookBudget(record.pip.name, 'stop', () => withPipHookSpan({
+                await this.#withHookBudget(record.plugin.name, 'stop', () => withPluginHookSpan({
                     appName: this.#appName,
-                    pipName: record.pip.name,
-                    pipVersion: record.pip.version,
+                    pluginName: record.plugin.name,
+                    pluginVersion: record.plugin.version,
                     hook: 'stop',
                     order: record.order,
-                    logger: pipLogger,
-                }, () => record.pip.hooks.stop(ctx)));
+                    logger: pluginLogger,
+                }, () => record.plugin.hooks.stop(ctx)));
                 record.started = false;
                 const durationMs = performance.now() - startedAt;
                 record.lifecycleDiagnostics.push({
-                    pip: record.pip.name,
+                    plugin: record.plugin.name,
                     hook: 'stop',
                     state: 'stopped',
                     order: record.order,
                     durationMs,
                     issues: [],
                 });
-                this.#emitHook('stop', record.pip.name, record.order, 'completed', { durationMs });
-                pipLogger.debug('stop: done', { 'dot.pip.duration.ms': durationMs });
+                this.#emitHook('stop', record.plugin.name, record.order, 'completed', { durationMs });
+                pluginLogger.debug('stop: done', { 'dot.plugin.duration.ms': durationMs });
             }
             catch (error) {
                 const durationMs = performance.now() - startedAt;
                 const issue = makeIssue({
                     code: DotLifecycleErrorCode.StopFailed,
-                    pip: record.pip.name,
-                    message: `stop hook threw for pip "${record.pip.name}": ${stringifyError(error)}`,
-                    remediation: `Fix the error in the stop() hook of "${record.pip.name}". Stop continues through individual failures and reports an aggregate error.`,
+                    plugin: record.plugin.name,
+                    message: `stop hook threw for plugin "${record.plugin.name}": ${stringifyError(error)}`,
+                    remediation: `Fix the error in the stop() hook of "${record.plugin.name}". Stop continues through individual failures and reports an aggregate error.`,
                     docsAnchor: 'stop-failed',
                 });
                 record.issues.push(issue);
                 record.lifecycleDiagnostics.push({
-                    pip: record.pip.name,
+                    plugin: record.plugin.name,
                     hook: 'stop',
                     state: 'failed',
                     order: record.order,
                     durationMs,
                     issues: [issue],
                 });
-                this.#emitHook('stop', record.pip.name, record.order, 'failed', { durationMs, error });
-                failures.push({ pip: record.pip.name, phase: 'stop', error });
-                pipLogger.error('stop: failed (continuing)', {
-                    'dot.pip.error.message': stringifyError(error),
+                this.#emitHook('stop', record.plugin.name, record.order, 'failed', { durationMs, error });
+                failures.push({ plugin: record.plugin.name, phase: 'stop', error });
+                pluginLogger.error('stop: failed (continuing)', {
+                    'dot.plugin.error.message': stringifyError(error),
                 });
             }
         }
@@ -1000,11 +1119,11 @@ export class DotAppImpl {
     }
     async #runDispose() {
         const phaseLogger = this.#logger.withAttribute('dot.app.phase', 'dispose');
-        phaseLogger.debug('dispose: starting', { 'dot.app.pip.count': this.#ordered.length });
+        phaseLogger.debug('dispose: starting', { 'dot.app.plugin.count': this.#ordered.length });
         return this.#withPhaseEmitAsync('dispose', () => withPhaseSpan({
             appName: this.#appName,
             phase: 'dispose',
-            pipCount: this.#ordered.length,
+            pluginCount: this.#ordered.length,
             logger: phaseLogger,
         }, () => this.#runDisposeInner(phaseLogger)));
     }
@@ -1032,14 +1151,14 @@ export class DotAppImpl {
                 throw new DotLifecycleError({
                     code: DotLifecycleErrorCode.DisposeFailed,
                     phase: 'dispose',
-                    message: `${failures.length} pip(s) failed during stop+dispose cascade`,
+                    message: `${failures.length} plugin(s) failed during stop+dispose cascade`,
                     failures,
                 });
             }
             phaseLogger.debug('dispose: complete (cascaded from started)');
             return;
         }
-        // From booted/stopped/configured/defined: only dispose booted pips.
+        // From booted/stopped/configured/defined: only dispose booted plugins.
         if (this.#state === 'failed') {
             // Already cleaned up at the failure site — mark disposed.
             this.#state = 'disposed';
@@ -1056,11 +1175,11 @@ export class DotAppImpl {
             throw new DotLifecycleError({
                 code: DotLifecycleErrorCode.DisposeFailed,
                 phase: 'dispose',
-                message: `${failures.length} pip(s) failed during dispose`,
+                message: `${failures.length} plugin(s) failed during dispose`,
                 failures,
             });
         }
-        phaseLogger.debug('dispose: complete', { 'dot.app.pip.count': this.#ordered.length });
+        phaseLogger.debug('dispose: complete', { 'dot.app.plugin.count': this.#ordered.length });
     }
     async #runDisposeForRecords(records, phaseLogger) {
         const failures = [];
@@ -1070,7 +1189,7 @@ export class DotAppImpl {
         // (declaration order): dispose runs in reverse, so cleaning the handle
         // with a republisher would kill it before the original provider's own
         // dispose hook gets to use it. `records` arrives reversed, so plain
-        // overwrite leaves the earliest-declared pip as each handle's owner.
+        // overwrite leaves the earliest-declared plugin as each handle's owner.
         const ownerOf = new Map();
         for (const record of records) {
             for (const value of Object.values(record.publishedServices)) {
@@ -1087,16 +1206,16 @@ export class DotAppImpl {
                 seen.add(value);
                 return true;
             });
-            const hasHook = record.pip.hooks.dispose !== undefined;
+            const hasHook = record.plugin.hooks.dispose !== undefined;
             if (!hasHook && lazyPublishes.length === 0) {
                 record.booted = false;
                 continue;
             }
-            const pipLogger = phaseLogger.withAttribute('dot.pip.name', record.pip.name);
+            const pluginLogger = phaseLogger.withAttribute('dot.plugin.name', record.plugin.name);
             if (hasHook) {
-                await this.#runDisposeHook(record, pipLogger, failures);
+                await this.#runDisposeHook(record, pluginLogger, failures);
             }
-            // Auto-dispose lazy service handles AFTER the pip's own dispose hook
+            // Auto-dispose lazy service handles AFTER the plugin's own dispose hook
             // (the hook may still use them). Never-initialized handles no-op.
             for (const [serviceKey, handle] of lazyPublishes) {
                 try {
@@ -1105,16 +1224,16 @@ export class DotAppImpl {
                 catch (error) {
                     const issue = makeIssue({
                         code: DotLifecycleErrorCode.DisposeFailed,
-                        pip: record.pip.name,
-                        message: `lazy service "${serviceKey}" cleanup threw for pip "${record.pip.name}": ${stringifyError(error)}`,
+                        plugin: record.plugin.name,
+                        message: `lazy service "${serviceKey}" cleanup threw for plugin "${record.plugin.name}": ${stringifyError(error)}`,
                         remediation: `Fix the error in the dispose callback passed to lazy(...) for service "${serviceKey}". Dispose continues through individual failures and reports an aggregate error.`,
                         docsAnchor: 'dispose-failed',
                     });
                     record.issues.push(issue);
-                    failures.push({ pip: record.pip.name, phase: 'dispose', error });
-                    pipLogger.error('dispose: lazy service cleanup failed (continuing)', {
-                        'dot.pip.service.key': serviceKey,
-                        'dot.pip.error.message': stringifyError(error),
+                    failures.push({ plugin: record.plugin.name, phase: 'dispose', error });
+                    pluginLogger.error('dispose: lazy service cleanup failed (continuing)', {
+                        'dot.plugin.service.key': serviceKey,
+                        'dot.plugin.error.message': stringifyError(error),
                     });
                 }
             }
@@ -1124,56 +1243,56 @@ export class DotAppImpl {
         }
         return failures;
     }
-    /** Run a single pip's dispose hook with spans/events/diagnostics. */
-    async #runDisposeHook(record, pipLogger, failures) {
+    /** Run a single plugin's dispose hook with spans/events/diagnostics. */
+    async #runDisposeHook(record, pluginLogger, failures) {
         record.hooks.add('dispose');
         const ctx = this.#buildHookCtx(record, 'dispose', true);
         const startedAt = performance.now();
-        this.#emitHook('dispose', record.pip.name, record.order, 'starting');
+        this.#emitHook('dispose', record.plugin.name, record.order, 'starting');
         try {
-            await this.#withHookBudget(record.pip.name, 'dispose', () => withPipHookSpan({
+            await this.#withHookBudget(record.plugin.name, 'dispose', () => withPluginHookSpan({
                 appName: this.#appName,
-                pipName: record.pip.name,
-                pipVersion: record.pip.version,
+                pluginName: record.plugin.name,
+                pluginVersion: record.plugin.version,
                 hook: 'dispose',
                 order: record.order,
-                logger: pipLogger,
-            }, () => record.pip.hooks.dispose(ctx)));
+                logger: pluginLogger,
+            }, () => record.plugin.hooks.dispose(ctx)));
             record.booted = false;
             const durationMs = performance.now() - startedAt;
             record.lifecycleDiagnostics.push({
-                pip: record.pip.name,
+                plugin: record.plugin.name,
                 hook: 'dispose',
                 state: 'disposed',
                 order: record.order,
                 durationMs,
                 issues: [],
             });
-            this.#emitHook('dispose', record.pip.name, record.order, 'completed', { durationMs });
-            pipLogger.debug('dispose: done', { 'dot.pip.duration.ms': durationMs });
+            this.#emitHook('dispose', record.plugin.name, record.order, 'completed', { durationMs });
+            pluginLogger.debug('dispose: done', { 'dot.plugin.duration.ms': durationMs });
         }
         catch (error) {
             const durationMs = performance.now() - startedAt;
             const issue = makeIssue({
                 code: DotLifecycleErrorCode.DisposeFailed,
-                pip: record.pip.name,
-                message: `dispose hook threw for pip "${record.pip.name}": ${stringifyError(error)}`,
-                remediation: `Fix the error in the dispose() hook of "${record.pip.name}". Dispose continues through individual failures and reports an aggregate error.`,
+                plugin: record.plugin.name,
+                message: `dispose hook threw for plugin "${record.plugin.name}": ${stringifyError(error)}`,
+                remediation: `Fix the error in the dispose() hook of "${record.plugin.name}". Dispose continues through individual failures and reports an aggregate error.`,
                 docsAnchor: 'dispose-failed',
             });
             record.issues.push(issue);
             record.lifecycleDiagnostics.push({
-                pip: record.pip.name,
+                plugin: record.plugin.name,
                 hook: 'dispose',
                 state: 'failed',
                 order: record.order,
                 durationMs,
                 issues: [issue],
             });
-            this.#emitHook('dispose', record.pip.name, record.order, 'failed', { durationMs, error });
-            failures.push({ pip: record.pip.name, phase: 'dispose', error });
-            pipLogger.error('dispose: failed (continuing)', {
-                'dot.pip.error.message': stringifyError(error),
+            this.#emitHook('dispose', record.plugin.name, record.order, 'failed', { durationMs, error });
+            failures.push({ plugin: record.plugin.name, phase: 'dispose', error });
+            pluginLogger.error('dispose: failed (continuing)', {
+                'dot.plugin.error.message': stringifyError(error),
             });
         }
     }
@@ -1187,62 +1306,67 @@ export class DotAppImpl {
         });
     }
     #buildManifest() {
-        const pips = [];
-        const routes = [];
+        const plugins = [];
+        const actions = [];
         const services = [];
         const lifecycle = [];
-        // Edges are observed at boot time: consumer pip → the pip whose
-        // published wire key satisfied its need. Before boot, the per-pip
+        const projections = [];
+        // Edges are observed at boot time: consumer plugin → the plugin whose
+        // published wire key satisfied its need. Before boot, the per-plugin
         // `dependencies` array (wire-key strings) is the declarative view.
         const dependencies = this.#wiringEdges.map(e => ({ ...e }));
-        for (const pip of this.#ordered) {
-            const record = this.#records.get(pip.name);
-            const needWireKeys = Object.entries(pip.needs).map(([alias, witness]) => wireKeyOf(witness, alias));
-            pips.push({
-                name: pip.name,
-                version: pip.version,
+        for (const plugin of this.#ordered) {
+            const record = this.#records.get(plugin.name);
+            const needWireKeys = Object.entries(plugin.needs).map(([alias, witness]) => wireKeyOf(witness, alias));
+            plugins.push({
+                name: plugin.name,
+                version: plugin.version,
                 dependencies: needWireKeys,
                 provides: [...record.provides],
             });
-            routes.push(...record.routes);
+            actions.push(...record.actions);
             services.push(...record.services);
+            projections.push(...record.projections);
             lifecycle.push({
-                pip: pip.name,
+                plugin: plugin.name,
                 hooks: [...record.hooks],
             });
         }
         return {
+            manifestVersion: 2,
             app: {
                 name: this.#appName,
                 version: this.#appVersion,
             },
-            pips,
-            routes,
+            plugins,
+            actions,
             services,
             lifecycle,
             dependencies,
+            projections,
         };
     }
     #buildDiagnostics() {
-        const pipDiagnostics = [];
-        const routeDiagnostics = [];
+        const pluginDiagnostics = [];
+        const actionDiagnostics = [];
         const serviceDiagnostics = [];
         const lifecycleDiagnostics = [];
         const issues = [];
-        for (const pip of this.#ordered) {
-            const record = this.#records.get(pip.name);
-            // Per-pip status: failed if any issue with severity error exists, ok otherwise.
+        for (const plugin of this.#ordered) {
+            const record = this.#records.get(plugin.name);
+            // Per-plugin status: failed if any issue with severity error exists, ok otherwise.
             const hasError = record.issues.some(i => i.severity === 'error');
             const status = hasError ? 'failed' : 'ok';
-            pipDiagnostics.push({
-                pip: pip.name,
+            pluginDiagnostics.push({
+                plugin: plugin.name,
                 status,
                 issues: [...record.issues],
             });
-            for (const route of record.routes) {
-                routeDiagnostics.push({
-                    id: route.id,
-                    pip: pip.name,
+            for (const action of record.actions) {
+                actionDiagnostics.push({
+                    id: action.id,
+                    plugin: plugin.name,
+                    binding: action.binding,
                     status: hasError ? 'failed' : 'ok',
                     issues: [],
                 });
@@ -1250,7 +1374,7 @@ export class DotAppImpl {
             for (const svc of record.services) {
                 serviceDiagnostics.push({
                     service: svc.name,
-                    pip: pip.name,
+                    plugin: plugin.name,
                     status: hasError
                         ? 'failed'
                         : record.booted || this.#state === 'defined' || this.#state === 'configured'
@@ -1263,13 +1387,14 @@ export class DotAppImpl {
             issues.push(...record.issues);
         }
         return {
+            snapshotVersion: 2,
             generatedAt: new Date().toISOString(),
             app: {
                 name: this.#appName,
                 state: this.#state,
             },
-            pips: pipDiagnostics,
-            routes: routeDiagnostics,
+            plugins: pluginDiagnostics,
+            actions: actionDiagnostics,
             services: serviceDiagnostics,
             lifecycle: lifecycleDiagnostics,
             issues,
@@ -1298,7 +1423,13 @@ function reverseRecords(records) {
     // eslint-disable-next-line unicorn/no-array-reverse -- lib target is ES2022, toReversed is ES2023.
     return [...records].reverse();
 }
-/** Re-export `ServiceKind` and `RouteTransport` for the kernel's internal use. */
+function hasToDotAction(source) {
+    return (typeof source === 'object' &&
+        source !== null &&
+        'toDotAction' in source &&
+        typeof source.toDotAction === 'function');
+}
+/** Re-export `ServiceKind` for the kernel's internal use. */
 export {} from '../manifest.js';
-export {} from '../pip-contract.js';
+export {} from '../plugin-contract.js';
 //# sourceMappingURL=app-instance.js.map

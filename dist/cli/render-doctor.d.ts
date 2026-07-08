@@ -2,7 +2,7 @@
  * Renderers for `dot doctor`.
  *
  * Reads a booted (or fully-failed) app's `diagnostics` snapshot and emits
- * either a JSON envelope or a human-readable per-pip status report.
+ * either a JSON envelope or a human-readable per-plugin status report.
  *
  * Envelope `status` reflects the worst severity present:
  *   - `failure` if any issue has severity `error`

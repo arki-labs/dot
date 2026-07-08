@@ -1,7 +1,7 @@
 /**
  * ASCII waterfall renderer for DOT lifecycle diagnostics.
  *
- * Given a `DotDiagnosticsSnapshot`, builds a compact per-phase, per-pip
+ * Given a `DotDiagnosticsSnapshot`, builds a compact per-phase, per-plugin
  * duration chart suitable for printing in a terminal or embedding in a
  * `dot doctor` text report. No colour, no Unicode beyond `█` so the
  * output stays clean in log aggregators and CI.
@@ -29,7 +29,7 @@ export type RenderTimelineOptions = {
     /** Maximum bar width in characters (default `50`). */
     readonly barWidth?: number;
     /**
-     * When `true`, also emit any pip's diagnostic `issues[]` underneath
+     * When `true`, also emit any plugin's diagnostic `issues[]` underneath
      * the bar so failure reasons are visible in the timeline view.
      * Default `true`.
      */

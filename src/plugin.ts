@@ -1,8 +1,8 @@
 /**
- * Narrow public surface for pip authors.
+ * Narrow public surface for plugin authors.
  *
- * Exposes the pip contract and the entry points a pip author needs to
- * author + test pips — `pip`, `service`, `token`, `provide`, `rename`,
+ * Exposes the plugin contract and the entry points a plugin author needs to
+ * author + test plugins — `plugin`, `service`, `token`, `provide`, `rename`,
  * `defineApp`, `testApp` / `bootTestApp`, plus lifecycle / manifest /
  * diagnostics types.
  *
@@ -11,13 +11,15 @@
  *
  * @example
  * ```ts
- * import { pip, service, type Pip } from '@arki/dot/pip';
+ * import { plugin, service, type Plugin } from '@arki/dot/plugin';
  * ```
  */
 
-export { isLazy, lazy, lazyOf, pip, provide, rename, service, token, DotPipError } from './pip-contract.js';
+export { isLazy, lazy, lazyOf, plugin, provide, rename, service, token, DotPluginError } from './plugin-contract.js';
 export type {
-  AnyPip,
+  AnyPlugin,
+  ActionDeclaration,
+  ActionSource,
   CtxOf,
   DotConfigureContext,
   EmptyShape,
@@ -26,18 +28,31 @@ export type {
   Lazy,
   LazyService,
   NeedsShape,
-  Pip,
-  PipNeeds,
-  PipProvides,
+  NoReservedKeys,
+  Plugin,
+  PluginNeeds,
+  PluginProvides,
+  ProjectionDeclaration,
   RenamedProvides,
   Service,
   ServiceRecord,
   Token,
   WireNeeds,
-} from './pip-contract.js';
+} from './plugin-contract.js';
 
 export { defineApp } from './define-app.js';
-export type { DotApp, DotAppBuilder, DotAppConfigured } from './define-app.js';
+export type {
+  DotApp,
+  DotAppBuilder,
+  DotAppConfigured,
+  NormalizeProvides,
+  UseAllAvail,
+  UseAllGuard,
+  UseGuard,
+} from './define-app.js';
+
+export { initPlugins } from './init-plugins.js';
+export type { InitPluginsFactory } from './init-plugins.js';
 
 export { testApp, bootTestApp } from './test-harness.js';
 export type { TestAppOptions } from './test-harness.js';
@@ -45,27 +60,31 @@ export type { TestAppOptions } from './test-harness.js';
 export type {
   DotLifecycleHook,
   DotLifecycleState,
-  DotLifecyclePipFailure,
+  DotLifecyclePluginFailure,
   DotLifecycleErrorCodeValue,
 } from './lifecycle.js';
 export { DotLifecycleError, DotLifecycleErrorCode, DOT_LIFECYCLE_HOOKS } from './lifecycle.js';
 
 export type {
   DotAppManifest,
-  PipManifest,
-  RouteManifest,
+  ActionDirection,
+  ActionManifest,
+  JsonObject,
+  JsonValue,
+  PluginManifest,
+  ProjectionManifest,
   ServiceManifest,
   LifecycleManifest,
   DependencyEdge,
   DependencyEdgeKind,
   ServiceKind,
-  RouteTransport,
 } from './manifest.js';
+export { toJsonObject } from './manifest.js';
 
 export type {
   DotDiagnosticsSnapshot,
-  PipDiagnostic,
-  RouteDiagnostic,
+  PluginDiagnostic,
+  ActionDiagnostic,
   ServiceDiagnostic,
   LifecycleDiagnostic,
   DiagnosticIssue,
@@ -78,7 +97,7 @@ export type {
   DotLifecycleEventStatus,
   DotLifecycleObserver,
   DotPhaseLifecycleEvent,
-  DotPipHookLifecycleEvent,
+  DotPluginHookLifecycleEvent,
 } from './lifecycle-observer.js';
 
 export { renderTimeline } from './timeline.js';

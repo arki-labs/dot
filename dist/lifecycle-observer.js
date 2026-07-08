@@ -2,7 +2,7 @@
  * Lifecycle observer surface for the DOT kernel.
  *
  * `DotLifecycleObserver` is the in-process companion to the OTel signals
- * emitted by {@link withPhaseSpan} / {@link withPipHookSpan}. Where OTel
+ * emitted by {@link withPhaseSpan} / {@link withPluginHookSpan}. Where OTel
  * is the contract for cross-process tracing (consumers register an SDK
  * and ship spans to a backend), the observer is the contract for *local*
  * programmatic inspection — used by tests, CLI tooling, ASCII waterfalls,

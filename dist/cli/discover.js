@@ -151,7 +151,7 @@ export async function loadAppFromFile(filePath) {
     throw new DotCliError({
         code: DotCliErrorCode.AppInvalidExport,
         message: `Default export from ${filePath} is not a DotApp or DotAppBuilder.`,
-        remediation: 'Export a DotApp or DotAppBuilder as the default. Example: `export default defineApp("my-app").use(pip);`',
+        remediation: 'Export a DotApp or DotAppBuilder as the default. Example: `export default defineApp("my-app").use(plugin);`',
         metadata: { filePath },
     });
 }
@@ -166,7 +166,7 @@ export async function discoverApp(options = {}) {
         throw new DotCliError({
             code: DotCliErrorCode.AppNotFound,
             message: `No DOT app file found in ${cwd}.`,
-            remediation: 'Create `dot.config.ts` exporting your app (e.g. `export default defineApp("my-app").use(pip)`), or pass `--app <path>` to point at an existing file.',
+            remediation: 'Create `dot.config.ts` exporting your app (e.g. `export default defineApp("my-app").use(plugin)`), or pass `--app <path>` to point at an existing file.',
             metadata: { cwd, searched: DEFAULT_APP_PATHS },
         });
     }

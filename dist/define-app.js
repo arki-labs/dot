@@ -1,12 +1,12 @@
 /**
  * Public entry point for the DOT kernel (v2).
  *
- * `defineApp(name)` returns a `DotAppBuilder` that accumulates pips via
- * `.use(pip)`, then transitions through the 5-hook lifecycle:
+ * `defineApp(name)` returns a `DotAppBuilder` that accumulates plugins via
+ * `.use(plugin)`, then transitions through the 5-hook lifecycle:
  *
  *   defineApp -> use* -> configure() -> boot() -> start() -> stop() -> dispose()
  *
- * `.use()` is compile-time guarded: a pip whose `needs` are not satisfied
+ * `.use()` is compile-time guarded: a plugin whose `needs` are not satisfied
  * by services provided so far — or whose provides collide with existing
  * wire keys — fails to typecheck at the call site ("Expected 2 arguments,
  * but got 1", with the diagnostic embedded in the expected second
@@ -25,8 +25,8 @@ import { renderTimeline } from './timeline.js';
  *
  * @example
  * const app = await defineApp('my-app')
- *   .use(dbPip)
- *   .use(billingPip)   // billing's needs must be satisfied by now
+ *   .use(dbPlugin)
+ *   .use(billingPlugin)   // billing's needs must be satisfied by now
  *   .boot();
  *
  * await app.start();
@@ -38,7 +38,7 @@ export function defineApp(name, options = {}) {
     const state = {
         appName: name,
         appVersion: options.version,
-        pips: [],
+        plugins: [],
         config: options.config,
         observers: options.observers,
         hookTimeoutMs: options.hookTimeoutMs,
@@ -49,7 +49,7 @@ function buildImpl(state) {
     return new DotAppImpl({
         appName: state.appName,
         appVersion: state.appVersion,
-        pips: state.pips,
+        plugins: state.plugins,
         config: state.config,
         observers: state.observers,
         hookTimeoutMs: state.hookTimeoutMs,
@@ -60,10 +60,17 @@ function makeBuilder(state) {
     // at the type level); the single cast below is the same kernel boundary
     // v1 crossed in its wrapApp helper.
     const impl = {
-        use(pip, ..._guard) {
+        use(plugin, ..._guard) {
             const nextState = {
                 ...state,
-                pips: [...state.pips, pip],
+                plugins: [...state.plugins, plugin],
+            };
+            return makeBuilder(nextState);
+        },
+        useAll(plugins, ..._guard) {
+            const nextState = {
+                ...state,
+                plugins: [...state.plugins, ...plugins],
             };
             return makeBuilder(nextState);
         },

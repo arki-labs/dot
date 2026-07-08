@@ -18,7 +18,7 @@
 export type DotLifecycleHook = 'configure' | 'boot' | 'start' | 'stop' | 'dispose';
 /**
  * The complete set of lifecycle hooks in execution order.
- * `stop` and `dispose` run in reverse declaration order across pips, but the
+ * `stop` and `dispose` run in reverse declaration order across plugins, but the
  * sequence of hooks themselves is always `configure -> boot -> start -> stop -> dispose`.
  */
 export declare const DOT_LIFECYCLE_HOOKS: readonly DotLifecycleHook[];
@@ -54,16 +54,20 @@ export declare const DotLifecycleErrorCode: {
     readonly ReuseAfterDispose: "DOT_LIFECYCLE_E007";
     /** Caller tried to reuse the app after a failed lifecycle. */
     readonly ReuseAfterFailure: "DOT_LIFECYCLE_E008";
-    /** Pip registered twice. */
-    readonly DuplicatePip: "DOT_LIFECYCLE_E011";
-    /** A pip's `needs` entry has no provider among earlier-booted pips. */
+    /** Plugin registered twice. */
+    readonly DuplicatePlugin: "DOT_LIFECYCLE_E011";
+    /** A plugin's `needs` entry has no provider among earlier-booted plugins. */
     readonly UnsatisfiedNeed: "DOT_LIFECYCLE_E012";
-    /** A pip published a wire key that an earlier pip already provides. */
+    /** A plugin published a wire key that an earlier plugin already provides. */
     readonly ServiceCollision: "DOT_LIFECYCLE_E013";
     /** A needs alias, publish key, or rename target uses the reserved `$` prefix. */
     readonly ReservedServiceKey: "DOT_LIFECYCLE_E014";
     /** A lifecycle hook exceeded the app's `hookTimeoutMs` watchdog. */
     readonly HookTimeout: "DOT_LIFECYCLE_E015";
+    /** Two actions in the same binding use the same id. */
+    readonly DuplicateAction: "DOT_LIFECYCLE_E016";
+    /** Action metadata is not JSON-round-trip safe. */
+    readonly ActionMetaNotJson: "DOT_LIFECYCLE_E017";
 };
 export type DotLifecycleErrorCodeValue = (typeof DotLifecycleErrorCode)[keyof typeof DotLifecycleErrorCode];
 /**
@@ -72,28 +76,28 @@ export type DotLifecycleErrorCodeValue = (typeof DotLifecycleErrorCode)[keyof ty
  * Carries:
  *  - `code`     — stable machine-readable error code (see {@link DotLifecycleErrorCode}).
  *  - `phase`    — which hook (or pseudo-hook) failed.
- *  - `pip`   — which pip name, when applicable.
+ *  - `plugin`   — which plugin name, when applicable.
  *  - `cause`    — original error if wrapped from a hook throw.
- *  - `failures` — for aggregate errors (stop/dispose), the per-pip failures.
+ *  - `failures` — for aggregate errors (stop/dispose), the per-plugin failures.
  */
 export declare class DotLifecycleError extends Error {
     readonly code: DotLifecycleErrorCodeValue;
     readonly phase: DotLifecycleHook;
-    readonly pip?: string;
+    readonly plugin?: string;
     readonly cause?: unknown;
-    readonly failures?: readonly DotLifecyclePipFailure[];
+    readonly failures?: readonly DotLifecyclePluginFailure[];
     constructor(args: {
         code: DotLifecycleErrorCodeValue;
         phase: DotLifecycleHook;
         message: string;
-        pip?: string;
+        plugin?: string;
         cause?: unknown;
-        failures?: readonly DotLifecyclePipFailure[];
+        failures?: readonly DotLifecyclePluginFailure[];
     });
 }
-/** Single pip failure inside an aggregate lifecycle error (stop/dispose). */
-export type DotLifecyclePipFailure = {
-    pip: string;
+/** Single plugin failure inside an aggregate lifecycle error (stop/dispose). */
+export type DotLifecyclePluginFailure = {
+    plugin: string;
     phase: DotLifecycleHook;
     error: unknown;
 };

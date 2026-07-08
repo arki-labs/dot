@@ -39,7 +39,11 @@ export type CliArgs = {
     observability?: boolean;
     /** `--graph` (honored by `explain` and `doctor`). */
     graph?: boolean;
-    /** `--openapi` (honored by `explain` only). */
+    /** `--as` projection format (honored by `explain` only). */
+    as?: string;
+    /** `--module` projection override (honored by `explain --as` only). */
+    module?: string;
+    /** Deprecated `--openapi` alias for `--as openapi`. */
     openapi?: boolean;
 };
 /**
@@ -54,6 +58,9 @@ export declare function parseArgs(argv: readonly string[]): CliArgs;
 export declare function runExplain(discovered: DiscoveredApp, opts: {
     json: boolean;
     graph?: boolean;
+    as?: string;
+    module?: string;
+    appFilePath?: string;
     openapi?: boolean;
     out?: (line: string) => void;
     now?: () => Date;
@@ -68,7 +75,7 @@ type DoctorRunOptions = {
      * present. Default `false`.
      */
     observability?: boolean;
-    /** When `true`, emit the pip graph (Mermaid) instead of diagnostics. */
+    /** When `true`, emit the plugin graph (Mermaid) instead of diagnostics. */
     graph?: boolean;
 };
 /**

@@ -1,12 +1,12 @@
 /**
  * Renderer for `dot explain --graph` / `dot doctor --graph`.
  *
- * Emits the app's pip graph as [Mermaid](https://mermaid.js.org) `flowchart`
+ * Emits the app's plugin graph as [Mermaid](https://mermaid.js.org) `flowchart`
  * source — paste-able into GitHub markdown, docs, and mermaid.live.
  *
- * The nodes are the pips in declaration order (which IS boot order in v2 —
+ * The nodes are the plugins in declaration order (which IS boot order in v2 —
  * the numbering makes that visible); the edges are the manifest's
- * **observed** dependency edges, recorded by the kernel when a pip's need
+ * **observed** dependency edges, recorded by the kernel when a plugin's need
  * was satisfied during boot. `explain` never boots, so its graph shows
  * declaration order with whatever edges configure-time metadata declared;
  * `doctor` boots, so its graph shows the real wiring.

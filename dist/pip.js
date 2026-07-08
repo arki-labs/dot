@@ -16,7 +16,9 @@
  */
 export { isLazy, lazy, lazyOf, pip, provide, rename, service, token, DotPipError } from './pip-contract.js';
 export { defineApp } from './define-app.js';
+export { initPips } from './init-pips.js';
 export { testApp, bootTestApp } from './test-harness.js';
 export { DotLifecycleError, DotLifecycleErrorCode, DOT_LIFECYCLE_HOOKS } from './lifecycle.js';
+export { toJsonObject } from './manifest.js';
 export { renderTimeline } from './timeline.js';
 //# sourceMappingURL=pip.js.map

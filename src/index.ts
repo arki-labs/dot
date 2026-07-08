@@ -3,20 +3,29 @@
  *
  * Public surface:
  *   - `defineApp(name)` — the entry point for composing applications.
- *   - `pip(config)` — author lifecycle-aware pips with typed needs/provides.
+ *   - `plugin(config)` — author lifecycle-aware plugins with typed needs/provides.
  *   - `service<T>()` / `token<T>()(key)` — service witnesses for DI wiring.
- *   - `rename(pip, map)` — mount-time multi-instance primitive.
+ *   - `rename(plugin, map)` — mount-time multi-instance primitive.
  *   - Lifecycle / manifest / diagnostics types.
- *   - `testApp` / `bootTestApp` — test harnesses for pip authors.
+ *   - `testApp` / `bootTestApp` — test harnesses for plugin authors.
  */
 
 // #region Kernel — public surface
 export { defineApp } from './define-app.js';
-export type { DotApp, DotAppBuilder, DotAppConfigured, UseGuard } from './define-app.js';
-
-export { isLazy, lazy, lazyOf, pip, provide, rename, service, token, DotPipError } from './pip-contract.js';
 export type {
-  AnyPip,
+  DotApp,
+  DotAppBuilder,
+  DotAppConfigured,
+  NormalizeProvides,
+  UseAllAvail,
+  UseAllGuard,
+  UseGuard,
+} from './define-app.js';
+
+export { isLazy, lazy, lazyOf, plugin, provide, rename, service, token, DotPluginError } from './plugin-contract.js';
+export type {
+  AnyPlugin,
+  ActionSource,
   CtxOf,
   DotConfigureContext,
   EmptyShape,
@@ -25,15 +34,19 @@ export type {
   Lazy,
   LazyService,
   NeedsShape,
-  Pip,
-  PipNeeds,
-  PipProvides,
+  NoReservedKeys,
+  Plugin,
+  PluginNeeds,
+  PluginProvides,
   RenamedProvides,
   Service,
   ServiceRecord,
   Token,
   WireNeeds,
-} from './pip-contract.js';
+} from './plugin-contract.js';
+
+export { initPlugins } from './init-plugins.js';
+export type { InitPluginsFactory } from './init-plugins.js';
 
 export {
   DotLifecycleError,
@@ -43,26 +56,30 @@ export {
 export type {
   DotLifecycleHook,
   DotLifecycleState,
-  DotLifecyclePipFailure,
+  DotLifecyclePluginFailure,
   DotLifecycleErrorCodeValue,
 } from './lifecycle.js';
 
 export type {
   DotAppManifest,
-  PipManifest,
-  RouteManifest,
+  ActionDirection,
+  ActionManifest,
+  JsonObject,
+  JsonValue,
+  PluginManifest,
+  ProjectionManifest,
   ServiceManifest,
   LifecycleManifest,
   DependencyEdge,
   DependencyEdgeKind,
   ServiceKind,
-  RouteTransport,
 } from './manifest.js';
+export { toJsonObject } from './manifest.js';
 
 export type {
   DotDiagnosticsSnapshot,
-  PipDiagnostic,
-  RouteDiagnostic,
+  PluginDiagnostic,
+  ActionDiagnostic,
   ServiceDiagnostic,
   LifecycleDiagnostic,
   DiagnosticIssue,
@@ -75,19 +92,19 @@ export type {
   DotLifecycleEventStatus,
   DotLifecycleObserver,
   DotPhaseLifecycleEvent,
-  DotPipHookLifecycleEvent,
+  DotPluginHookLifecycleEvent,
 } from './lifecycle-observer.js';
 
 export { renderTimeline } from './timeline.js';
 export type { RenderTimelineOptions } from './timeline.js';
 
-export { testApp, bootTestApp, testPip } from './test-harness.js';
-export type { TestAppOptions, TestPipBuilder } from './test-harness.js';
+export { testApp, bootTestApp, testPlugin } from './test-harness.js';
+export type { TestAppOptions, TestPluginBuilder } from './test-harness.js';
 
 export { hookSignals } from './signals.js';
 export type { HookSignalsOptions, SignalTarget } from './signals.js';
 
 // Task 9b: CLI envelope type is exported so adapter packages can produce the
-// same shape from related tooling (release-tooling, pip scaffolds, etc.).
+// same shape from related tooling (release-tooling, plugin scaffolds, etc.).
 export type { DotCliEnvelope, DotCliEnvelopeStatus } from './cli/render-explain.js';
 // #endregion

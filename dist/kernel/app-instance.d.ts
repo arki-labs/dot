@@ -8,11 +8,11 @@ import type { DotDiagnosticsSnapshot } from '../diagnostics.js';
 import type { DotLifecycleObserver } from '../lifecycle-observer.js';
 import type { DotLifecycleState } from '../lifecycle.js';
 import type { DotAppManifest } from '../manifest.js';
-import type { AnyPip } from '../pip-contract.js';
+import type { AnyPlugin } from '../plugin-contract.js';
 export type DotAppInternalConfig = {
     appName: string;
     appVersion?: string;
-    pips: readonly AnyPip[];
+    plugins: readonly AnyPlugin[];
     /** Runtime config bag passed to every `boot` hook. */
     config?: Readonly<Record<string, unknown>>;
     /**
@@ -58,7 +58,7 @@ export declare class DotAppImpl {
     /** Public dispose(). Idempotent + concurrent-safe. */
     dispose(): Promise<void>;
 }
-/** Re-export `ServiceKind` and `RouteTransport` for the kernel's internal use. */
-export { type RouteTransport, type ServiceKind } from '../manifest.js';
-export { type Pip } from '../pip-contract.js';
+/** Re-export `ServiceKind` for the kernel's internal use. */
+export { type ServiceKind } from '../manifest.js';
+export { type Plugin } from '../plugin-contract.js';
 //# sourceMappingURL=app-instance.d.ts.map

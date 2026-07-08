@@ -1,7 +1,7 @@
 {
   "name": "@arki/dot",
-  "version": "0.3.0",
-  "description": "TypeScript-first application composition framework for the ARKI package family — lifecycle-aware pips, deterministic boot order, manifest/diagnostics envelopes, and an agent-native CLI. A DOT app is the sum of its pips.",
+  "version": "0.4.0",
+  "description": "TypeScript-first application composition framework for the ARKI package family — lifecycle-aware plugins, deterministic boot order, manifest/diagnostics envelopes, and an agent-native CLI. A DOT app is the sum of its plugins.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -15,8 +15,8 @@
     "arki",
     "typescript",
     "framework",
-    "pip",
-    "pips",
+    "plugin",
+    "plugins",
     "lifecycle",
     "diagnostics",
     "manifest",
@@ -31,10 +31,10 @@
       "import": "./src/index.ts",
       "default": "./dist/index.js"
     },
-    "./pip": {
-      "types": "./dist/pip.d.ts",
-      "import": "./dist/pip.js",
-      "default": "./dist/pip.js"
+    "./plugin": {
+      "types": "./dist/plugin.d.ts",
+      "import": "./dist/plugin.js",
+      "default": "./dist/plugin.js"
     },
     "./package.json": "./package.json",
     "./cli": {
@@ -63,7 +63,7 @@
   ],
   "dependencies": {
     "@arki/assert": "0.0.2",
-    "@arki/contracts": "0.0.2",
+    "@arki/contracts": "0.0.3",
     "@arki/log": "0.0.2",
     "@opentelemetry/api": "^1.9.0",
     "zod": "4.3.5"

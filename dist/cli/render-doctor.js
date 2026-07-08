@@ -2,7 +2,7 @@
  * Renderers for `dot doctor`.
  *
  * Reads a booted (or fully-failed) app's `diagnostics` snapshot and emits
- * either a JSON envelope or a human-readable per-pip status report.
+ * either a JSON envelope or a human-readable per-plugin status report.
  *
  * Envelope `status` reflects the worst severity present:
  *   - `failure` if any issue has severity `error`
@@ -17,8 +17,8 @@ function nowIso(opts) {
     return factory().toISOString();
 }
 /**
- * Walk every issue carried anywhere in the snapshot (top-level + per-pip +
- * per-route + per-service + per-lifecycle entry) and pick the worst severity.
+ * Walk every issue carried anywhere in the snapshot (top-level + per-plugin +
+ * per-action + per-service + per-lifecycle entry) and pick the worst severity.
  */
 function worstSeverity(snap) {
     let hasWarning = false;
@@ -35,10 +35,10 @@ function worstSeverity(snap) {
     };
     let hasError = false;
     collect(snap.issues);
-    for (const p of snap.pips)
+    for (const p of snap.plugins)
         collect(p.issues);
-    for (const r of snap.routes)
-        collect(r.issues);
+    for (const action of snap.actions)
+        collect(action.issues);
     for (const s of snap.services)
         collect(s.issues);
     for (const l of snap.lifecycle)
@@ -62,10 +62,10 @@ export function buildDoctorEnvelope(source, opts) {
             errors.push(issue);
     };
     collect(source.diagnostics.issues);
-    for (const p of source.diagnostics.pips)
+    for (const p of source.diagnostics.plugins)
         collect(p.issues);
-    for (const r of source.diagnostics.routes)
-        collect(r.issues);
+    for (const action of source.diagnostics.actions)
+        collect(action.issues);
     for (const s of source.diagnostics.services)
         collect(s.issues);
     for (const l of source.diagnostics.lifecycle)
@@ -109,14 +109,14 @@ function renderTextDoctor(snap, status) {
     lines.push('='.repeat(title.length));
     lines.push(`generatedAt: ${snap.generatedAt}`);
     lines.push('');
-    // Per-pip status
-    lines.push(`Pips (${snap.pips.length})`);
-    if (snap.pips.length === 0) {
+    // Per-plugin status
+    lines.push(`Plugins (${snap.plugins.length})`);
+    if (snap.plugins.length === 0) {
         lines.push('  (none)');
     }
     else {
-        for (const p of snap.pips) {
-            lines.push(`  ${statusIcon(p.status)} ${p.pip}`);
+        for (const p of snap.plugins) {
+            lines.push(`  ${statusIcon(p.status)} ${p.plugin}`);
             if (p.issues.length > 0) {
                 lines.push(...renderIssueLines(p.issues, '    '));
             }
@@ -127,20 +127,20 @@ function renderTextDoctor(snap, status) {
     if (snap.services.length > 0) {
         lines.push(`Services (${snap.services.length})`);
         for (const s of snap.services) {
-            lines.push(`  ${statusIcon(s.status)} ${s.service} (pip: ${s.pip})`);
+            lines.push(`  ${statusIcon(s.status)} ${s.service} (plugin: ${s.plugin})`);
             if (s.issues.length > 0) {
                 lines.push(...renderIssueLines(s.issues, '    '));
             }
         }
         lines.push('');
     }
-    // Routes
-    if (snap.routes.length > 0) {
-        lines.push(`Routes (${snap.routes.length})`);
-        for (const r of snap.routes) {
-            lines.push(`  ${statusIcon(r.status)} ${r.id} (pip: ${r.pip})`);
-            if (r.issues.length > 0) {
-                lines.push(...renderIssueLines(r.issues, '    '));
+    // Actions
+    if (snap.actions.length > 0) {
+        lines.push(`Actions (${snap.actions.length})`);
+        for (const action of snap.actions) {
+            lines.push(`  ${statusIcon(action.status)} ${action.binding}:${action.id} (plugin: ${action.plugin})`);
+            if (action.issues.length > 0) {
+                lines.push(...renderIssueLines(action.issues, '    '));
             }
         }
         lines.push('');
@@ -150,7 +150,7 @@ function renderTextDoctor(snap, status) {
     if (lifeWithIssues.length > 0) {
         lines.push(`Lifecycle issues (${lifeWithIssues.length})`);
         for (const l of lifeWithIssues) {
-            lines.push(`  ${l.pip}:${l.hook} (order=${l.order}, state=${l.state})`);
+            lines.push(`  ${l.plugin}:${l.hook} (order=${l.order}, state=${l.state})`);
             lines.push(...renderIssueLines(l.issues, '    '));
         }
         lines.push('');

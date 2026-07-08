@@ -15,15 +15,18 @@
  * ```
  */
 export { isLazy, lazy, lazyOf, pip, provide, rename, service, token, DotPipError } from './pip-contract.js';
-export type { AnyPip, CtxOf, DotConfigureContext, EmptyShape, InferredProvides, KernelCtx, Lazy, LazyService, NeedsShape, Pip, PipNeeds, PipProvides, RenamedProvides, Service, ServiceRecord, Token, WireNeeds, } from './pip-contract.js';
+export type { AnyPip, ActionDeclaration, ActionSource, CtxOf, DotConfigureContext, EmptyShape, InferredProvides, KernelCtx, Lazy, LazyService, NeedsShape, NoReservedKeys, Pip, PipNeeds, PipProvides, ProjectionDeclaration, RenamedProvides, Service, ServiceRecord, Token, WireNeeds, } from './pip-contract.js';
 export { defineApp } from './define-app.js';
-export type { DotApp, DotAppBuilder, DotAppConfigured } from './define-app.js';
+export type { DotApp, DotAppBuilder, DotAppConfigured, NormalizeProvides, UseAllAvail, UseAllGuard, UseGuard, } from './define-app.js';
+export { initPips } from './init-pips.js';
+export type { InitPipsFactory } from './init-pips.js';
 export { testApp, bootTestApp } from './test-harness.js';
 export type { TestAppOptions } from './test-harness.js';
 export type { DotLifecycleHook, DotLifecycleState, DotLifecyclePipFailure, DotLifecycleErrorCodeValue, } from './lifecycle.js';
 export { DotLifecycleError, DotLifecycleErrorCode, DOT_LIFECYCLE_HOOKS } from './lifecycle.js';
-export type { DotAppManifest, PipManifest, RouteManifest, ServiceManifest, LifecycleManifest, DependencyEdge, DependencyEdgeKind, ServiceKind, RouteTransport, } from './manifest.js';
-export type { DotDiagnosticsSnapshot, PipDiagnostic, RouteDiagnostic, ServiceDiagnostic, LifecycleDiagnostic, DiagnosticIssue, DiagnosticSeverity, DiagnosticStatus, } from './diagnostics.js';
+export type { DotAppManifest, ActionDirection, ActionManifest, JsonObject, JsonValue, PipManifest, ProjectionManifest, ServiceManifest, LifecycleManifest, DependencyEdge, DependencyEdgeKind, ServiceKind, } from './manifest.js';
+export { toJsonObject } from './manifest.js';
+export type { DotDiagnosticsSnapshot, PipDiagnostic, ActionDiagnostic, ServiceDiagnostic, LifecycleDiagnostic, DiagnosticIssue, DiagnosticSeverity, DiagnosticStatus, } from './diagnostics.js';
 export type { DotLifecycleEvent, DotLifecycleEventStatus, DotLifecycleObserver, DotPhaseLifecycleEvent, DotPipHookLifecycleEvent, } from './lifecycle-observer.js';
 export { renderTimeline } from './timeline.js';
 export type { RenderTimelineOptions } from './timeline.js';

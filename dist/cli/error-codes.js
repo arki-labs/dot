@@ -20,6 +20,14 @@ export const DotCliErrorCode = {
     AppLifecycleFailed: 'DOT_CLI_E006',
     /** `dot doctor --observability` ran but no OTel SDK is registered. */
     ObservabilityNoSdk: 'DOT_CLI_E007',
+    /** Requested projection format is not registered by the app. */
+    ProjectionNotFound: 'DOT_CLI_E008',
+    /** Projection module import failed or did not export `project`. */
+    ProjectionImportFailed: 'DOT_CLI_E009',
+    /** Projection execution failed or returned non-JSON output. */
+    ProjectionExecutionFailed: 'DOT_CLI_E010',
+    /** Multiple modules claim the same projection format. */
+    ProjectionConflict: 'DOT_CLI_E011',
 };
 const DOCS_BASE = 'https://docs.arki.dev/dot/cli';
 /**
@@ -34,6 +42,10 @@ export const DotCliDocsAnchor = {
     [DotCliErrorCode.InvalidArgs]: 'invalid-args',
     [DotCliErrorCode.AppLifecycleFailed]: 'app-lifecycle-failed',
     [DotCliErrorCode.ObservabilityNoSdk]: 'observability-no-sdk',
+    [DotCliErrorCode.ProjectionNotFound]: 'projection-not-found',
+    [DotCliErrorCode.ProjectionImportFailed]: 'projection-import-failed',
+    [DotCliErrorCode.ProjectionExecutionFailed]: 'projection-execution-failed',
+    [DotCliErrorCode.ProjectionConflict]: 'projection-conflict',
 };
 export function dotCliDocsUrl(code) {
     return `${DOCS_BASE}#${DotCliDocsAnchor[code]}`;
