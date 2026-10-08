@@ -1,6 +1,6 @@
 {
   "name": "@arki/dot",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "TypeScript-first application composition framework for the ARKI package family — lifecycle-aware plugins, deterministic boot order, manifest/diagnostics envelopes, and an agent-native CLI. A DOT app is the sum of its plugins.",
   "license": "MIT",
   "repository": {
@@ -62,11 +62,11 @@
     "package.json"
   ],
   "dependencies": {
-    "@arki/assert": "0.0.2",
-    "@arki/contracts": "0.0.3",
-    "@arki/log": "0.0.2",
-    "@opentelemetry/api": "^1.9.0",
-    "zod": "4.3.5"
+    "@arki/assert": "0.0.3",
+    "@arki/contracts": "0.0.4",
+    "@arki/log": "0.0.3",
+    "@opentelemetry/api": "^1.9.1",
+    "zod": "4.6.5"
   },
   "publishConfig": {
     "access": "public"
