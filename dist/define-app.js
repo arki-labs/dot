@@ -1,10 +1,10 @@
 /**
  * Public entry point for the DOT kernel (v2).
  *
- * `defineApp(name)` returns a `DotAppBuilder` that accumulates plugins via
- * `.use(plugin)`, then transitions through the 5-hook lifecycle:
+ * `defineApp(name)` returns a `DotAppBuilder` that accumulates units in three
+ * hexagonal steps, then transitions through the 5-hook lifecycle:
  *
- *   defineApp -> use* -> configure() -> boot() -> start() -> stop() -> dispose()
+ *   defineApp -> use* -> features? -> serve* -> configure() -> boot() -> start() -> stop() -> dispose()
  *
  * `.use()` is compile-time guarded: a plugin whose `needs` are not satisfied
  * by services provided so far — or whose provides collide with existing
@@ -18,6 +18,7 @@
  *
  * See `./lifecycle.ts` for hook semantics, failure ordering, idempotency rules.
  */
+import { bindDriver, plug } from './feature.js';
 import { DotAppImpl } from './kernel/app-instance.js';
 import { renderTimeline } from './timeline.js';
 /**
@@ -39,6 +40,7 @@ export function defineApp(name, options = {}) {
         appName: name,
         appVersion: options.version,
         plugins: [],
+        features: [],
         config: options.config,
         observers: options.observers,
         hookTimeoutMs: options.hookTimeoutMs,
@@ -49,7 +51,7 @@ function buildImpl(state) {
     return new DotAppImpl({
         appName: state.appName,
         appVersion: state.appVersion,
-        plugins: state.plugins,
+        plugins: state.plugins.map(unit => ('bind' in unit ? unit.bind(state.features) : unit)),
         config: state.config,
         observers: state.observers,
         hookTimeoutMs: state.hookTimeoutMs,
@@ -58,8 +60,25 @@ function buildImpl(state) {
 function makeBuilder(state) {
     // The `use` implementation is signature-erased (the guard exists purely
     // at the type level); the single cast below is the same kernel boundary
-    // v1 crossed in its wrapApp helper.
+    // v1 crossed in its wrapApp helper. The phase split is type-only too:
+    // one runtime object serves every phase.
     const impl = {
+        features(features, ..._guard) {
+            const nextState = {
+                ...state,
+                plugins: [...state.plugins, ...features.map((f) => ({ ...plug(f), role: 'feature' }))],
+                features: [...state.features, ...features],
+            };
+            return makeBuilder(nextState);
+        },
+        serve(adapter, ..._guard) {
+            const bound = 'bind' in adapter ? bindDriver(adapter, state.features) : adapter;
+            const nextState = {
+                ...state,
+                plugins: [...state.plugins, { ...bound, role: 'driving' }],
+            };
+            return makeBuilder(nextState);
+        },
         use(plugin, ..._guard) {
             const nextState = {
                 ...state,

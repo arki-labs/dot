@@ -15,7 +15,7 @@
  * ```
  */
 export { isLazy, lazy, lazyOf, plugin, provide, rename, service, token, DotPluginError } from './plugin-contract.js';
-export type { AnyPlugin, ActionDeclaration, ActionSource, CtxOf, DotConfigureContext, EmptyShape, InferredProvides, KernelCtx, Lazy, LazyService, NeedsShape, NoReservedKeys, Plugin, PluginNeeds, PluginProvides, ProjectionDeclaration, RenamedProvides, Service, ServiceRecord, Token, WireNeeds, } from './plugin-contract.js';
+export type { AnyPlugin, DotPluginRole, ActionDeclaration, ActionSource, CtxOf, DotConfigureContext, EmptyShape, InferredProvides, KernelCtx, Lazy, LazyService, NeedsShape, NoReservedKeys, Plugin, PluginNeeds, PluginProvides, ProjectionDeclaration, RenamedProvides, Service, ServiceRecord, Token, WireNeeds, } from './plugin-contract.js';
 export { defineApp } from './define-app.js';
 export type { DotApp, DotAppBuilder, DotAppConfigured, NormalizeProvides, UseAllAvail, UseAllGuard, UseGuard, } from './define-app.js';
 export { initPlugins } from './init-plugins.js';

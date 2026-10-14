@@ -255,6 +255,8 @@ declare const ProvidesSym: unique symbol;
  * The phantom symbol properties carry `TNeeds` / `TProvides` for the app
  * builder's compile-time wiring check; they never exist at runtime.
  */
+/** See {@link Plugin.role}. */
+export type DotPluginRole = 'feature' | 'driving';
 export type Plugin<TNeeds extends ServiceRecord = ServiceRecord, TProvides extends ServiceRecord = ServiceRecord> = {
     /** Unique identifier for this plugin within the app. */
     readonly name: string;
@@ -265,6 +267,12 @@ export type Plugin<TNeeds extends ServiceRecord = ServiceRecord, TProvides exten
     readonly actions: readonly ActionSource[];
     /** Mount-time renames: publish key → new wire key (see {@link rename}). */
     readonly renames: Readonly<Record<string, string>>;
+    /**
+     * Where the app builder mounted this plugin in the hexagon: `feature`
+     * (`.features()`) or `driving` (`.serve()`). Absent for `.use()` — a
+     * driven adapter, or any plugin in an app that never calls `.features()`.
+     */
+    readonly role?: DotPluginRole;
     /**
      * The logging slot. At most one plugin per app fills it. The kernel calls
      * the factory before its first lifecycle record and closes the handle after
@@ -357,8 +365,8 @@ export declare function rename<TN extends ServiceRecord, TP extends ServiceRecor
  * and coding agents can then match on a stable `code`, follow `docsUrl`,
  * and apply `remediation` without parsing the message.
  *
- * Codes are per-adapter. Recommended prefix is `<PKG>_PLUGIN_E<NNN>` (e.g.
- * `KV_PLUGIN_E001`, `DB_PLUGIN_E001`). The kernel does not own the code
+ * Codes are per-adapter. Recommended prefix is `ARKI_<PKG>_PLUGIN_E<NNN>` (e.g.
+ * `ARKI_KV_PLUGIN_E001`, `ARKI_DB_PLUGIN_E001`). The kernel does not own the code
  * namespace — each adapter defines its own constants and links them in
  * its README.
  *
@@ -366,7 +374,7 @@ export declare function rename<TN extends ServiceRecord, TP extends ServiceRecor
  * of the API") and principle 4 ("agent-discoverable everywhere").
  */
 export declare class DotPluginError extends Error {
-    /** Stable error code, e.g. `KV_PLUGIN_E001`. */
+    /** Stable error code, e.g. `ARKI_KV_PLUGIN_E001`. */
     readonly code: string;
     /** One-sentence guidance on how to fix the underlying problem. */
     readonly remediation: string;

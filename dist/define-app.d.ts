@@ -1,10 +1,10 @@
 /**
  * Public entry point for the DOT kernel (v2).
  *
- * `defineApp(name)` returns a `DotAppBuilder` that accumulates plugins via
- * `.use(plugin)`, then transitions through the 5-hook lifecycle:
+ * `defineApp(name)` returns a `DotAppBuilder` that accumulates units in three
+ * hexagonal steps, then transitions through the 5-hook lifecycle:
  *
- *   defineApp -> use* -> configure() -> boot() -> start() -> stop() -> dispose()
+ *   defineApp -> use* -> features? -> serve* -> configure() -> boot() -> start() -> stop() -> dispose()
  *
  * `.use()` is compile-time guarded: a plugin whose `needs` are not satisfied
  * by services provided so far — or whose provides collide with existing
@@ -22,6 +22,7 @@ import type { DotDiagnosticsSnapshot } from './diagnostics.js';
 import type { DotLifecycleObserver } from './lifecycle-observer.js';
 import type { DotLifecycleState } from './lifecycle.js';
 import type { DotAppManifest } from './manifest.js';
+import type { AnyFeature, Driven, Driver, PluginsOf } from './feature.js';
 import type { AnyPlugin, EmptyShape, Plugin, ServiceRecord } from './plugin-contract.js';
 type MissingKeys<TAvail, TNeeds> = {
     readonly [K in Exclude<keyof TNeeds, keyof TAvail>]: TNeeds[K];
@@ -33,13 +34,13 @@ type MismatchedKeys<TAvail, TNeeds> = {
     };
 };
 type NeedsError<TAvail extends ServiceRecord, TNeeds extends ServiceRecord> = {
-    readonly 'DOT: plugin needs services no earlier .use() provides': {
+    readonly 'DOT: this unit needs services that nothing before it provides. Mount their providers earlier (.use → .features → .serve)': {
         readonly missing: MissingKeys<TAvail, TNeeds>;
         readonly mismatched: MismatchedKeys<TAvail, TNeeds>;
     };
 };
 type CollisionError<TAvail, TProvides> = {
-    readonly 'DOT: plugin provides wire keys already provided (use rename())': keyof TAvail & keyof TProvides;
+    readonly 'DOT: this unit provides a key that an earlier unit already provides. Give one of them a new key with rename()': keyof TAvail & keyof TProvides;
 };
 /**
  * A plugin whose `boot` always throws infers `TProvides = never`, which would
@@ -60,12 +61,12 @@ type UseAllState<TAvail extends ServiceRecord, TPlugins extends readonly AnyPlug
 ] ? Head extends Plugin<infer TNeeds, infer TProvides> ? UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>> extends [] ? UseAllState<TAvail & NormalizeProvides<TProvides>, Extract<Tail, readonly AnyPlugin[]>> : {
     readonly avail: TAvail;
     readonly error: {
-        readonly 'DOT: useAll tuple contains a plugin that cannot be used at this position': UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>>[0];
+        readonly 'DOT: a unit in this list cannot be mounted at its position': UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>>[0];
     };
 } : {
     readonly avail: TAvail;
     readonly error: {
-        readonly 'DOT: useAll accepts only plugins': Head;
+        readonly 'DOT: this list accepts only plugins': Head;
     };
 } : {
     readonly avail: TAvail;
@@ -74,7 +75,7 @@ type UseAllState<TAvail extends ServiceRecord, TPlugins extends readonly AnyPlug
 export type UseAllAvail<TAvail extends ServiceRecord, TPlugins extends readonly AnyPlugin[]> = UseAllState<TAvail, TPlugins>['avail'];
 type UseAllTupleGuard<TPlugins extends readonly AnyPlugin[]> = number extends TPlugins['length'] ? [
     error: {
-        readonly 'DOT: useAll requires a tuple; add `as const` or pass plugins directly in declaration order': TPlugins;
+        readonly 'DOT: pass a tuple. Add `as const`, or list the units inline in boot order': TPlugins;
     }
 ] : [];
 export type UseAllGuard<TAvail extends ServiceRecord, TPlugins extends readonly AnyPlugin[]> = [
@@ -144,25 +145,8 @@ export type DotAppConfigured<TServices extends ServiceRecord> = {
     /** See {@link DotApp.timeline}. */
     timeline(): string;
 };
-/**
- * Builder produced by `defineApp(name)`.
- *
- * `.use(plugin)` is type-tracking in both directions: the plugin's `needs` must
- * be satisfied by the services accumulated so far, and its `provides`
- * merge into the accumulated record for the next `.use()`.
- */
-export type DotAppBuilder<TAvail extends ServiceRecord> = {
-    /**
-     * Register a plugin. Compile error when the plugin's needs are unsatisfied
-     * or its provides collide with existing wire keys.
-     */
-    use<TNeeds extends ServiceRecord, TProvides extends ServiceRecord>(plugin: Plugin<TNeeds, TProvides>, ...guard: UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>>): DotAppBuilder<TAvail & NormalizeProvides<TProvides>>;
-    /**
-     * Register a tuple of plugins in declaration order. This is type-equivalent
-     * to calling `.use()` for each item and keeps the same ordering/collision
-     * guard across the whole tuple.
-     */
-    useAll<const TPlugins extends readonly AnyPlugin[]>(plugins: TPlugins, ...guard: UseAllGuard<TAvail, TPlugins>): DotAppBuilder<UseAllAvail<TAvail, TPlugins>>;
+/** Lifecycle entry points every builder phase shares. */
+export type DotAppLifecycle<TAvail extends ServiceRecord> = {
     /** Run the configure phase synchronously. Throws on configure failure. */
     configure(): DotAppConfigured<TAvail>;
     /** Run configure + boot. Throws on configure or boot failure. */
@@ -170,6 +154,53 @@ export type DotAppBuilder<TAvail extends ServiceRecord> = {
     /** Convenience: configure + boot + start. */
     start(): Promise<DotApp<TAvail>>;
 };
+/**
+ * Builder after `.features()` or `.serve()` — only driving adapters remain.
+ * Driven adapters (`.use`) cannot follow the domain: infrastructure never
+ * depends on a feature.
+ */
+export type DotServeBuilder<TAvail extends ServiceRecord> = DotAppLifecycle<TAvail> & {
+    /**
+     * Register a driving adapter (HTTP server, job worker, scheduler). A
+     * `driver(...)` is bound to the features mounted by `.features()`; a
+     * plain plugin is mounted as-is. Same compile-time guard as `.use()`.
+     */
+    serve<TNeeds extends ServiceRecord, TProvides extends ServiceRecord>(adapter: Plugin<TNeeds, TProvides> | Driver<TNeeds, TProvides>, ...guard: UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>>): DotServeBuilder<TAvail & NormalizeProvides<TProvides>>;
+};
+/**
+ * Builder produced by `defineApp(name)`. The app reads as a hexagon:
+ *
+ *   .use(...)        driven adapters — what features need (db, kv, queue client)
+ *   .features([...]) the domain core
+ *   .serve(...)      driving adapters — what calls the features (http, workers)
+ *
+ * Each step is type-tracking in both directions: a unit's `needs` must be
+ * satisfied by the services accumulated so far, and its `provides` merge
+ * into the accumulated record for the next step.
+ */
+export type DotAppBuilder<TAvail extends ServiceRecord> = DotAppLifecycle<TAvail> & {
+    /**
+     * Register a driven adapter. Compile error when the plugin's needs are
+     * unsatisfied or its provides collide with existing wire keys.
+     *
+     * A `driven(...)` adapter is bound when the app is built, to the full
+     * feature list — so it can read the features' static declarations (their
+     * `use` slices) while still booting BEFORE them. A `driver(...)` is
+     * rejected here: it calls into the features, so it belongs in `.serve()`.
+     */
+    use<TNeeds extends ServiceRecord, TProvides extends ServiceRecord>(plugin: Plugin<TNeeds, TProvides> | Driven<TNeeds, TProvides>, ...guard: UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>>): DotAppBuilder<TAvail & NormalizeProvides<TProvides>>;
+    /**
+     * Register a tuple of plugins in declaration order. This is type-equivalent
+     * to calling `.use()` for each item and keeps the same ordering/collision
+     * guard across the whole tuple.
+     */
+    useAll<const TPlugins extends readonly AnyPlugin[]>(plugins: TPlugins, ...guard: UseAllGuard<TAvail, TPlugins>): DotAppBuilder<UseAllAvail<TAvail, TPlugins>>;
+    /**
+     * Mount the domain features, in order. A feature may need what earlier
+     * features provide. Called once: after it, only `.serve()` remains.
+     */
+    features<const TFeatures extends readonly AnyFeature[]>(features: TFeatures, ...guard: UseAllGuard<TAvail, Extract<PluginsOf<TFeatures>, readonly AnyPlugin[]>>): DotServeBuilder<UseAllAvail<TAvail, Extract<PluginsOf<TFeatures>, readonly AnyPlugin[]>>>;
+} & Pick<DotServeBuilder<TAvail>, 'serve'>;
 /**
  * Create a new DOT app builder.
  *

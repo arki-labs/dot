@@ -21,7 +21,9 @@ export type GraphData = {
 };
 /**
  * Build Mermaid `flowchart` source from a manifest. Deterministic: node
- * ids follow declaration order, edges follow manifest order.
+ * ids follow declaration order, edges follow manifest order. An app built
+ * with `.features()` / `.serve()` is drawn as the hexagon's three groups;
+ * any other app is a flat list.
  */
 export declare function buildMermaidGraph(manifest: DotAppManifest): string;
 /**

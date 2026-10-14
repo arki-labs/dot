@@ -10,9 +10,9 @@
  *   - `testApp` / `bootTestApp` — test harnesses for plugin authors.
  */
 export { defineApp } from './define-app.js';
-export type { DotApp, DotAppBuilder, DotAppConfigured, NormalizeProvides, UseAllAvail, UseAllGuard, UseGuard, } from './define-app.js';
+export type { DotApp, DotAppBuilder, DotAppConfigured, DotAppLifecycle, DotServeBuilder, NormalizeProvides, UseAllAvail, UseAllGuard, UseGuard, } from './define-app.js';
 export { isLazy, lazy, lazyOf, plugin, provide, rename, service, token, DotPluginError } from './plugin-contract.js';
-export type { AnyPlugin, ActionSource, CtxOf, DotConfigureContext, DotLoggingContext, DotLoggingHandle, EmptyShape, InferredProvides, KernelCtx, Lazy, LazyService, NeedsShape, NoReservedKeys, Plugin, PluginNeeds, PluginProvides, RenamedProvides, Service, ServiceRecord, Token, WireNeeds, } from './plugin-contract.js';
+export type { AnyPlugin, DotPluginRole, ActionSource, CtxOf, DotConfigureContext, DotLoggingContext, DotLoggingHandle, EmptyShape, InferredProvides, KernelCtx, Lazy, LazyService, NeedsShape, NoReservedKeys, Plugin, PluginNeeds, PluginProvides, RenamedProvides, Service, ServiceRecord, Token, WireNeeds, } from './plugin-contract.js';
 export { initPlugins } from './init-plugins.js';
 export type { InitPluginsFactory } from './init-plugins.js';
 export { DotLifecycleError, DotLifecycleErrorCode, DOT_LIFECYCLE_HOOKS } from './lifecycle.js';

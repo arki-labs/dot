@@ -11,6 +11,7 @@
  * `projections`). Consumers MUST NOT see an omitted array — empty is empty,
  * but never missing.
  */
+import type { DotPluginRole } from './plugin-contract.js';
 import type { DotLifecycleHook } from './lifecycle.js';
 /** JSON-serializable value — the manifest's currency. */
 export type JsonValue = string | number | boolean | null | JsonValue[] | {
@@ -93,6 +94,8 @@ export type DotAppManifest = {
 export type PluginManifest = {
     name: string;
     version?: string;
+    /** Hexagon role from the app builder — see `Plugin.role`. */
+    role?: DotPluginRole;
     dependencies: readonly string[];
     provides: readonly string[];
 };
