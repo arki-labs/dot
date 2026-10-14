@@ -7,27 +7,27 @@
  */
 export declare const DotCliErrorCode: {
     /** No app file could be discovered at the cwd and `--app` was not provided. */
-    readonly AppNotFound: "DOT_CLI_E001";
+    readonly AppNotFound: 'DOT_CLI_E001';
     /** App file was located but its default export is not a DotApp/DotAppBuilder. */
-    readonly AppInvalidExport: "DOT_CLI_E002";
+    readonly AppInvalidExport: 'DOT_CLI_E002';
     /** Importing the app file threw an exception. */
-    readonly AppImportFailed: "DOT_CLI_E003";
+    readonly AppImportFailed: 'DOT_CLI_E003';
     /** Unknown CLI command. */
-    readonly UnknownCommand: "DOT_CLI_E004";
+    readonly UnknownCommand: 'DOT_CLI_E004';
     /** CLI args were malformed. */
-    readonly InvalidArgs: "DOT_CLI_E005";
+    readonly InvalidArgs: 'DOT_CLI_E005';
     /** Configure or boot threw while preparing the app for inspection. */
-    readonly AppLifecycleFailed: "DOT_CLI_E006";
+    readonly AppLifecycleFailed: 'DOT_CLI_E006';
     /** `dot doctor --observability` ran but no OTel SDK is registered. */
-    readonly ObservabilityNoSdk: "DOT_CLI_E007";
+    readonly ObservabilityNoSdk: 'DOT_CLI_E007';
     /** Requested projection format is not registered by the app. */
-    readonly ProjectionNotFound: "DOT_CLI_E008";
+    readonly ProjectionNotFound: 'DOT_CLI_E008';
     /** Projection module import failed or did not export `project`. */
-    readonly ProjectionImportFailed: "DOT_CLI_E009";
+    readonly ProjectionImportFailed: 'DOT_CLI_E009';
     /** Projection execution failed or returned non-JSON output. */
-    readonly ProjectionExecutionFailed: "DOT_CLI_E010";
+    readonly ProjectionExecutionFailed: 'DOT_CLI_E010';
     /** Multiple modules claim the same projection format. */
-    readonly ProjectionConflict: "DOT_CLI_E011";
+    readonly ProjectionConflict: 'DOT_CLI_E011';
 };
 export type DotCliErrorCodeValue = (typeof DotCliErrorCode)[keyof typeof DotCliErrorCode];
 /**

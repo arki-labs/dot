@@ -13,7 +13,7 @@
 export { defineApp } from './define-app.js';
 export { isLazy, lazy, lazyOf, plugin, provide, rename, service, token, DotPluginError } from './plugin-contract.js';
 export { initPlugins } from './init-plugins.js';
-export { DotLifecycleError, DotLifecycleErrorCode, DOT_LIFECYCLE_HOOKS, } from './lifecycle.js';
+export { DotLifecycleError, DotLifecycleErrorCode, DOT_LIFECYCLE_HOOKS } from './lifecycle.js';
 export { toJsonObject } from './manifest.js';
 export { renderTimeline } from './timeline.js';
 export { testApp, bootTestApp, testPlugin } from './test-harness.js';

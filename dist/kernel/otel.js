@@ -1,3 +1,4 @@
+import { metrics, SpanStatusCode, trace } from '@opentelemetry/api';
 /**
  * OpenTelemetry instrumentation for the DOT kernel.
  *
@@ -25,7 +26,6 @@
  * @see packages/dot/docs/principles.md — principle 3 (deterministic) +
  *      principle 4 (agent-discoverable).
  */
-import { metrics, SpanStatusCode, trace } from '@opentelemetry/api';
 const INSTRUMENTATION_NAME = '@arki/dot';
 const INSTRUMENTATION_VERSION = '0.1.0';
 /** OTel tracer for the DOT kernel. No-op when no SDK is registered. */
@@ -108,10 +108,6 @@ export function withPluginHookSpan(opts, fn) {
             'dot.plugin.order': opts.order,
         }),
     });
-    if (opts.logger) {
-        const sc = span.spanContext();
-        opts.logger.setTraceContext(sc.traceId, sc.spanId);
-    }
     const started = performance.now();
     let status = 'ok';
     const finish = () => {
@@ -170,10 +166,6 @@ export function withPhaseSpan(opts, fn) {
             'dot.app.plugin.count': opts.pluginCount,
         }),
     }, (span) => {
-        if (opts.logger) {
-            const sc = span.spanContext();
-            opts.logger.setTraceContext(sc.traceId, sc.spanId);
-        }
         const started = performance.now();
         let status = 'ok';
         const finish = () => {

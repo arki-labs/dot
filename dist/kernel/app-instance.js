@@ -4,13 +4,21 @@
  * Not exported from the public surface. Tests reach it only through
  * `defineApp(...)` and its returned `DotApp` interface.
  */
-import { Logger } from '@arki/log';
-import { createDebugLogger } from '@arki/log/debug';
+import { getLogger } from '@arki/log';
 import { DotLifecycleError, DotLifecycleErrorCode } from '../lifecycle.js';
 import { toJsonObject } from '../manifest.js';
 import { isLazy, isLazyWitness, lazyOf } from '../plugin-contract.js';
 import { withPhaseSpan, withPluginHookSpan } from './otel.js';
-const debugKernel = createDebugLogger('arki:dot:kernel');
+const kernelLog = getLogger('arki:dot:kernel');
+/**
+ * Logging cannot report its own failure through logging (RFC §7 of the
+ * `@arki/log` redesign), so a failed close of the logging slot goes to the
+ * console, once. It never replaces the lifecycle's own result or error.
+ */
+function reportLoggingCloseFailure(error) {
+    // eslint-disable-next-line no-console -- logging is closing; the console is the only channel left
+    console.error('[arki:dot] closing the logging slot failed', error);
+}
 const DOCS_BASE = 'https://docs.arki.dev/dot/diagnostics';
 /** Resolve a needs-shape witness to its wire key. */
 function wireKeyOf(witness, alias) {
@@ -84,6 +92,12 @@ export class DotAppImpl {
      * with its trace in any OTel-compatible backend.
      */
     #logger;
+    /** The plugin that fills the logging slot, found when the app is assembled. */
+    #loggingPlugin;
+    /** The active logging handle, between activation and close. */
+    #logging;
+    /** Set once logging is closed; later closes return the same promise. */
+    #loggingClosed;
     /**
      * In-process lifecycle observers. Fan-out is synchronous; observer
      * exceptions are caught and dropped (DEBUG-logged). Mutable through
@@ -96,12 +110,23 @@ export class DotAppImpl {
         this.#appVersion = config.appVersion;
         this.#hookTimeoutMs = config.hookTimeoutMs;
         this.#config = Object.freeze({ ...config.config });
-        this.#logger = new Logger('arki:dot:lifecycle', { 'dot.app.name': config.appName });
+        this.#logger = getLogger('arki:dot:lifecycle').with({ 'dot.app.name': config.appName });
         this.#observers = new Set(config.observers);
         // Declaration order is boot order in v2. Duplicate names are surfaced at
         // construction (the `configure` phase pseudo-time).
-        debugKernel('[%s] registering %d plugin(s) in declaration order', this.#appName, config.plugins.length);
         this.#ordered = [...config.plugins];
+        // The logging slot: found here (pure, no IO), activated by `runConfigure`.
+        const loggingPlugins = this.#ordered.filter(plugin => plugin.logging !== undefined);
+        if (loggingPlugins.length > 1) {
+            const names = loggingPlugins.map(plugin => `"${plugin.name}"`).join(', ');
+            throw new DotLifecycleError({
+                code: DotLifecycleErrorCode.DuplicateLogging,
+                phase: 'configure',
+                plugin: loggingPlugins[1]?.name,
+                message: `Plugins ${names} all fill the logging slot — an app has at most one logging plugin. Keep one.`,
+            });
+        }
+        this.#loggingPlugin = loggingPlugins[0];
         this.#records = new Map();
         for (const [order, plugin] of this.#ordered.entries()) {
             if (this.#records.has(plugin.name)) {
@@ -183,7 +208,12 @@ export class DotAppImpl {
                 observer(event);
             }
             catch (error) {
-                debugKernel('[%s] observer threw on %s/%s: %O', this.#appName, event.kind, event.status, error);
+                kernelLog.debug('[{dot.app.name}] observer threw on {dot.event.kind}/{dot.event.status}', {
+                    'dot.app.name': this.#appName,
+                    'dot.event.kind': event.kind,
+                    'dot.event.status': event.status,
+                    error: error instanceof Error ? error : String(error),
+                });
             }
         }
     }
@@ -398,16 +428,64 @@ export class DotAppImpl {
         if (this.#state === 'failed' || this.#state === 'disposed') {
             throw this.#reuseError('configure');
         }
-        const phaseLogger = this.#logger.withAttribute('dot.app.phase', 'configure');
-        phaseLogger.debug('configure: starting', { 'dot.app.plugin.count': this.#ordered.length });
-        this.#withPhaseEmit('configure', () => {
-            withPhaseSpan({
-                appName: this.#appName,
-                phase: 'configure',
-                pluginCount: this.#ordered.length,
-                logger: phaseLogger,
-            }, () => this.#runConfigureInner(phaseLogger));
+        this.#activateLogging();
+        kernelLog.debug('[{dot.app.name}] registering {dot.app.plugin.count} plugin(s) in declaration order', {
+            'dot.app.name': this.#appName,
+            'dot.app.plugin.count': this.#ordered.length,
         });
+        const phaseLogger = this.#logger.with({ 'dot.app.phase': 'configure' });
+        phaseLogger.debug('configure: starting', { 'dot.app.plugin.count': this.#ordered.length });
+        try {
+            this.#withPhaseEmit('configure', () => {
+                withPhaseSpan({
+                    appName: this.#appName,
+                    phase: 'configure',
+                    pluginCount: this.#ordered.length,
+                }, span => this.#runConfigureInner(phaseLogger.withTrace(span.spanContext())));
+            });
+        }
+        catch (error) {
+            void this.#closeLoggingIn('failed');
+            throw error;
+        }
+    }
+    /**
+     * Activate the logging slot, once, before the first lifecycle record. A
+     * factory that throws fails the app in `configure`.
+     */
+    #activateLogging() {
+        const owner = this.#loggingPlugin;
+        if (owner?.logging === undefined || this.#logging !== undefined || this.#loggingClosed !== undefined)
+            return;
+        try {
+            this.#logging = owner.logging({ appName: this.#appName });
+        }
+        catch (error) {
+            this.#state = 'failed';
+            throw new DotLifecycleError({
+                code: DotLifecycleErrorCode.ConfigureFailed,
+                phase: 'configure',
+                plugin: owner.name,
+                message: `logging slot of plugin "${owner.name}" threw: ${stringifyError(error)}`,
+                cause: error,
+            });
+        }
+    }
+    /**
+     * Close the logging slot, once, after the app's last lifecycle record.
+     * Never rejects: a failed close is reported, not thrown.
+     */
+    #closeLogging() {
+        if (this.#loggingClosed === undefined) {
+            const handle = this.#logging;
+            this.#logging = undefined;
+            this.#loggingClosed = handle === undefined ? Promise.resolve() : handle.close().catch(reportLoggingCloseFailure);
+        }
+        return this.#loggingClosed;
+    }
+    /** Close logging if the app is now in `state` (a terminal one). */
+    #closeLoggingIn(state) {
+        return this.#state === state ? this.#closeLogging() : Promise.resolve();
     }
     /**
      * Inner configure loop. Separated from `runConfigure` so the phase span
@@ -417,7 +495,7 @@ export class DotAppImpl {
     #runConfigureInner(phaseLogger) {
         for (const plugin of this.#ordered) {
             const record = this.#records.get(plugin.name);
-            const pluginLogger = phaseLogger.withAttribute('dot.plugin.name', plugin.name);
+            let pluginLogger = phaseLogger.with({ 'dot.plugin.name': plugin.name });
             const declaredStarted = performance.now();
             try {
                 for (const source of plugin.actions)
@@ -484,8 +562,11 @@ export class DotAppImpl {
                     pluginVersion: plugin.version,
                     hook: 'configure',
                     order: record.order,
-                    logger: pluginLogger,
-                }, () => plugin.hooks.configure(ctx));
+                }, span => {
+                    // Later records of this plugin's hook carry its span too.
+                    pluginLogger = pluginLogger.withTrace(span.spanContext());
+                    return plugin.hooks.configure(ctx);
+                });
             }
             catch (error) {
                 const durationMs = performance.now() - started;
@@ -607,20 +688,32 @@ export class DotAppImpl {
         if (this.#state === 'booted' || this.#state === 'started' || this.#state === 'stopped') {
             return;
         }
-        return this.#runBoot();
+        return this.#closeLoggingOnFailure(() => this.#runBoot());
+    }
+    /**
+     * Run a phase. If it leaves the app `failed`, close logging after the
+     * failure and its rollback are written, then rethrow the original error.
+     */
+    async #closeLoggingOnFailure(run) {
+        try {
+            await run();
+        }
+        catch (error) {
+            await this.#closeLoggingIn('failed');
+            throw error;
+        }
     }
     async #runBoot() {
         if (!this.#configured) {
             this.runConfigure();
         }
-        const phaseLogger = this.#logger.withAttribute('dot.app.phase', 'boot');
+        const phaseLogger = this.#logger.with({ 'dot.app.phase': 'boot' });
         phaseLogger.debug('boot: starting', { 'dot.app.plugin.count': this.#ordered.length });
         return this.#withPhaseEmitAsync('boot', () => withPhaseSpan({
             appName: this.#appName,
             phase: 'boot',
             pluginCount: this.#ordered.length,
-            logger: phaseLogger,
-        }, () => this.#runBootInner(phaseLogger)));
+        }, span => this.#runBootInner(phaseLogger.withTrace(span.spanContext()))));
     }
     /**
      * Resolve a plugin's needs into a hook context (alias-keyed), joined with
@@ -753,7 +846,7 @@ export class DotAppImpl {
         };
         for (const plugin of this.#ordered) {
             const record = this.#records.get(plugin.name);
-            const pluginLogger = phaseLogger.withAttribute('dot.plugin.name', plugin.name);
+            let pluginLogger = phaseLogger.with({ 'dot.plugin.name': plugin.name });
             const started = performance.now();
             // Resolve needs BEFORE invoking the hook — a plugin with needs but no
             // boot hook still fails fast when its wiring is unsatisfied.
@@ -792,20 +885,21 @@ export class DotAppImpl {
                     pluginVersion: plugin.version,
                     hook: 'boot',
                     order: record.order,
-                    logger: pluginLogger,
                 }, 
                 // Erasure boundary: hooks are stored as `(ctx: never) => ...`;
                 // the kernel is the one caller allowed to cross it.
-                () => plugin.hooks.boot(ctx)));
+                span => {
+                    // Later records of this plugin's hook carry its span too.
+                    pluginLogger = pluginLogger.withTrace(span.spanContext());
+                    return plugin.hooks.boot(ctx);
+                }));
             }
             catch (error) {
                 const timedOut = error instanceof DotLifecycleError && error.code === DotLifecycleErrorCode.HookTimeout;
                 return fail({
                     record,
                     code: timedOut ? DotLifecycleErrorCode.HookTimeout : DotLifecycleErrorCode.BootFailed,
-                    message: timedOut
-                        ? error.message
-                        : `boot hook threw for plugin "${plugin.name}": ${stringifyError(error)}`,
+                    message: timedOut ? error.message : `boot hook threw for plugin "${plugin.name}": ${stringifyError(error)}`,
                     remediation: timedOut
                         ? `Find the hang in the boot() hook of "${plugin.name}" — a missing await or a connection that never settles — or raise defineApp's hookTimeoutMs.`
                         : `Fix the error in the boot() hook of "${plugin.name}". If boot opens partial resources before throwing, clean them up locally — DOT only disposes plugins whose boot completed.`,
@@ -877,7 +971,7 @@ export class DotAppImpl {
     async start() {
         if (this.#startInflight)
             return this.#startInflight;
-        this.#startInflight = this.#enqueueTransition(() => this.#startTransition()).finally(() => {
+        this.#startInflight = this.#enqueueTransition(() => this.#closeLoggingOnFailure(() => this.#startTransition())).finally(() => {
             this.#startInflight = null;
         });
         return this.#startInflight;
@@ -896,14 +990,13 @@ export class DotAppImpl {
             await this.#runBoot();
         }
         // From booted or stopped, run start hooks.
-        const phaseLogger = this.#logger.withAttribute('dot.app.phase', 'start');
+        const phaseLogger = this.#logger.with({ 'dot.app.phase': 'start' });
         phaseLogger.debug('start: starting', { 'dot.app.plugin.count': this.#ordered.length });
         return this.#withPhaseEmitAsync('start', () => withPhaseSpan({
             appName: this.#appName,
             phase: 'start',
             pluginCount: this.#ordered.length,
-            logger: phaseLogger,
-        }, () => this.#runStartInner(phaseLogger)));
+        }, span => this.#runStartInner(phaseLogger.withTrace(span.spanContext()))));
     }
     /**
      * Inner start loop. Separated from `start()` so the phase span wrapper
@@ -913,7 +1006,7 @@ export class DotAppImpl {
         const startedRecords = [];
         for (const plugin of this.#ordered) {
             const record = this.#records.get(plugin.name);
-            const pluginLogger = phaseLogger.withAttribute('dot.plugin.name', plugin.name);
+            let pluginLogger = phaseLogger.with({ 'dot.plugin.name': plugin.name });
             if (!plugin.hooks.start) {
                 pluginLogger.debug('start: skipped (no hook)');
                 continue;
@@ -929,8 +1022,11 @@ export class DotAppImpl {
                     pluginVersion: plugin.version,
                     hook: 'start',
                     order: record.order,
-                    logger: pluginLogger,
-                }, () => plugin.hooks.start(ctx)));
+                }, span => {
+                    // Later records of this plugin's hook carry its span too.
+                    pluginLogger = pluginLogger.withTrace(span.spanContext());
+                    return plugin.hooks.start(ctx);
+                }));
             }
             catch (error) {
                 const durationMs = performance.now() - startedAt;
@@ -938,9 +1034,7 @@ export class DotAppImpl {
                 const issue = makeIssue({
                     code: timedOut ? DotLifecycleErrorCode.HookTimeout : DotLifecycleErrorCode.StartFailed,
                     plugin: plugin.name,
-                    message: timedOut
-                        ? error.message
-                        : `start hook threw for plugin "${plugin.name}": ${stringifyError(error)}`,
+                    message: timedOut ? error.message : `start hook threw for plugin "${plugin.name}": ${stringifyError(error)}`,
                     remediation: timedOut
                         ? `Find the hang in the start() hook of "${plugin.name}" — or raise defineApp's hookTimeoutMs. DOT rolls back as for any start failure.`
                         : `Fix the error in the start() hook of "${plugin.name}". DOT will stop all already-started plugins and dispose all booted plugins in reverse order.`,
@@ -1019,20 +1113,20 @@ export class DotAppImpl {
         return this.#runStop();
     }
     async #runStop() {
-        const phaseLogger = this.#logger.withAttribute('dot.app.phase', 'stop');
+        const phaseLogger = this.#logger.with({ 'dot.app.phase': 'stop' });
         phaseLogger.debug('stop: starting', { 'dot.app.plugin.count': this.#ordered.length });
         return this.#withPhaseEmitAsync('stop', () => withPhaseSpan({
             appName: this.#appName,
             phase: 'stop',
             pluginCount: this.#ordered.length,
-            logger: phaseLogger,
-        }, async () => {
+        }, async (span) => {
+            const tracedLogger = phaseLogger.withTrace(span.spanContext());
             const startedRecords = this.#ordered.map(p => this.#records.get(p.name)).filter(r => r.started);
-            const failures = await this.#runStopForRecords(reverseRecords(startedRecords), phaseLogger);
+            const failures = await this.#runStopForRecords(reverseRecords(startedRecords), tracedLogger);
             this.#state = 'stopped';
             this.#manifest = this.#buildManifest();
             if (failures.length > 0) {
-                phaseLogger.warn('stop: complete with failures', { 'dot.app.failure.count': failures.length });
+                tracedLogger.warn('stop: complete with failures', { 'dot.app.failure.count': failures.length });
                 throw new DotLifecycleError({
                     code: DotLifecycleErrorCode.StopFailed,
                     phase: 'stop',
@@ -1040,7 +1134,7 @@ export class DotAppImpl {
                     failures,
                 });
             }
-            phaseLogger.debug('stop: complete', { 'dot.app.plugin.count': this.#ordered.length });
+            tracedLogger.debug('stop: complete', { 'dot.app.plugin.count': this.#ordered.length });
         }));
     }
     async #runStopForRecords(records, phaseLogger) {
@@ -1048,7 +1142,7 @@ export class DotAppImpl {
         for (const record of records) {
             if (!record.plugin.hooks.stop)
                 continue;
-            const pluginLogger = phaseLogger.withAttribute('dot.plugin.name', record.plugin.name);
+            let pluginLogger = phaseLogger.with({ 'dot.plugin.name': record.plugin.name });
             record.hooks.add('stop');
             const ctx = this.#buildHookCtx(record, 'stop', true);
             const startedAt = performance.now();
@@ -1060,8 +1154,11 @@ export class DotAppImpl {
                     pluginVersion: record.plugin.version,
                     hook: 'stop',
                     order: record.order,
-                    logger: pluginLogger,
-                }, () => record.plugin.hooks.stop(ctx)));
+                }, span => {
+                    // Later records of this plugin's hook carry its span too.
+                    pluginLogger = pluginLogger.withTrace(span.spanContext());
+                    return record.plugin.hooks.stop(ctx);
+                }));
                 record.started = false;
                 const durationMs = performance.now() - startedAt;
                 record.lifecycleDiagnostics.push({
@@ -1115,17 +1212,22 @@ export class DotAppImpl {
     async #disposeTransition() {
         if (this.#state === 'disposed')
             return;
-        return this.#runDispose();
+        try {
+            await this.#runDispose();
+        }
+        finally {
+            // After `dispose: complete` (or its failure record): logging closes last.
+            await this.#closeLoggingIn('disposed');
+        }
     }
     async #runDispose() {
-        const phaseLogger = this.#logger.withAttribute('dot.app.phase', 'dispose');
+        const phaseLogger = this.#logger.with({ 'dot.app.phase': 'dispose' });
         phaseLogger.debug('dispose: starting', { 'dot.app.plugin.count': this.#ordered.length });
         return this.#withPhaseEmitAsync('dispose', () => withPhaseSpan({
             appName: this.#appName,
             phase: 'dispose',
             pluginCount: this.#ordered.length,
-            logger: phaseLogger,
-        }, () => this.#runDisposeInner(phaseLogger)));
+        }, span => this.#runDisposeInner(phaseLogger.withTrace(span.spanContext()))));
     }
     /**
      * Inner dispose orchestration. Separated from `#runDispose` so the
@@ -1211,7 +1313,7 @@ export class DotAppImpl {
                 record.booted = false;
                 continue;
             }
-            const pluginLogger = phaseLogger.withAttribute('dot.plugin.name', record.plugin.name);
+            const pluginLogger = phaseLogger.with({ 'dot.plugin.name': record.plugin.name });
             if (hasHook) {
                 await this.#runDisposeHook(record, pluginLogger, failures);
             }
@@ -1244,7 +1346,8 @@ export class DotAppImpl {
         return failures;
     }
     /** Run a single plugin's dispose hook with spans/events/diagnostics. */
-    async #runDisposeHook(record, pluginLogger, failures) {
+    async #runDisposeHook(record, recordLogger, failures) {
+        let pluginLogger = recordLogger;
         record.hooks.add('dispose');
         const ctx = this.#buildHookCtx(record, 'dispose', true);
         const startedAt = performance.now();
@@ -1256,8 +1359,11 @@ export class DotAppImpl {
                 pluginVersion: record.plugin.version,
                 hook: 'dispose',
                 order: record.order,
-                logger: pluginLogger,
-            }, () => record.plugin.hooks.dispose(ctx)));
+            }, span => {
+                // Later records of this plugin's hook carry its span too.
+                pluginLogger = pluginLogger.withTrace(span.spanContext());
+                return record.plugin.hooks.dispose(ctx);
+            }));
             record.booted = false;
             const durationMs = performance.now() - startedAt;
             record.lifecycleDiagnostics.push({
@@ -1424,10 +1530,7 @@ function reverseRecords(records) {
     return [...records].reverse();
 }
 function hasToDotAction(source) {
-    return (typeof source === 'object' &&
-        source !== null &&
-        'toDotAction' in source &&
-        typeof source.toDotAction === 'function');
+    return (typeof source === 'object' && source !== null && 'toDotAction' in source && typeof source.toDotAction === 'function');
 }
 /** Re-export `ServiceKind` for the kernel's internal use. */
 export {} from '../manifest.js';

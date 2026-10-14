@@ -1,24 +1,7 @@
 #!/usr/bin/env node
-/**
- * `dot` CLI entry point.
- *
- * Two commands are wired today (more land in v1.1):
- *   - `dot explain` — print the static app graph (manifest)
- *   - `dot doctor`  — boot the app and print runtime diagnostics
- *
- * Common options:
- *   --json       Emit JSON envelope instead of human-readable text
- *   --app <p>    Path to the app file (overrides auto-discovery)
- *   --cwd <p>    Working directory (default: process.cwd())
- *   --help       Show help
- *   --version    Print version
- *
- * Exit codes: `0` on success/warning envelopes (doctor warnings still mean the
- * app booted), `1` on `failure` envelopes and on every structured CLI error.
- */
 import type { DiscoveredApp } from './discover.js';
 import type { DotCliEnvelope } from './render-explain.js';
-import { DotCliError, DotCliErrorCode, dotCliDocsUrl } from './error-codes.js';
+import { dotCliDocsUrl, DotCliError, DotCliErrorCode } from './error-codes.js';
 export type CliCommand = 'explain' | 'doctor' | 'new' | 'help' | 'version';
 export type CliArgs = {
     command: CliCommand;
@@ -29,6 +12,8 @@ export type CliArgs = {
     positional?: string;
     /** `--target` (only honored by `new`). */
     target?: string;
+    /** `--template` (only honored by `new`). Validated by `runNew`. */
+    template?: string;
     /** `--pm` (only honored by `new`). */
     pm?: 'npm' | 'pnpm' | 'bun';
     /** `--dry-run` (only honored by `new`). */

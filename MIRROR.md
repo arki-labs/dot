@@ -1,6 +1,6 @@
 # @arki/dot
 
-Published version: **0.4.1**
+Published version: **0.5.0**
 
 This repository is a **read-only mirror** of the [@arki/dot](https://www.npmjs.com/package/@arki/dot) npm package.
 

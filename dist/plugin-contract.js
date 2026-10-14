@@ -144,6 +144,7 @@ export function plugin(def) {
         needs: def.needs ?? {},
         actions: def.actions ?? [],
         renames: {},
+        ...(def.logging === undefined ? {} : { logging: def.logging }),
         hooks: {
             ...(def.configure === undefined ? {} : { configure: def.configure }),
             ...(def.boot === undefined ? {} : { boot: def.boot }),

@@ -12,9 +12,9 @@
 import { stat } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createDebugLogger } from '@arki/log/debug';
+import { getLogger } from '@arki/log';
 import { DotCliError, DotCliErrorCode } from './error-codes.js';
-const debugDiscover = createDebugLogger('arki:dot:cli:discover');
+const debugDiscover = getLogger('arki:dot:cli:discover');
 /**
  * Default file names probed at cwd, in priority order.
  * Each entry is tried with each of the supported file extensions below.
@@ -48,19 +48,19 @@ export async function resolveAppFile(options = {}) {
     const cwd = options.cwd ?? process.cwd();
     if (options.appPath) {
         const absolute = isAbsolute(options.appPath) ? options.appPath : resolve(cwd, options.appPath);
-        debugDiscover('explicit app path: %s', absolute);
+        debugDiscover.debug('explicit app path: {path}', { path: absolute });
         return absolute;
     }
     for (const base of DEFAULT_APP_PATHS) {
         for (const ext of SUPPORTED_EXTENSIONS) {
             const candidate = resolve(cwd, `${base}${ext}`);
             if (await fileExists(candidate)) {
-                debugDiscover('discovered app file: %s', candidate);
+                debugDiscover.debug('discovered app file: {file}', { file: candidate });
                 return candidate;
             }
         }
     }
-    debugDiscover('no app file found at %s', cwd);
+    debugDiscover.debug('no app file found at {cwd}', { cwd });
     return null;
 }
 /**
@@ -110,6 +110,23 @@ function unwrapDefaultExport(mod) {
  *
  * Throws `DotCliError` on any failure path.
  */
+/**
+ * The code and fix-it hint of an error thrown by a declaration helper
+ * (`FeatureError`, `JournalError`, `ScheduleError`, ...), if it carries them.
+ * A declaration that rejects a mistake in the code throws while the app
+ * module is imported, so its own code is the useful one to show.
+ */
+function codedCause(err) {
+    if (!(err instanceof Error) || !('code' in err) || typeof err.code !== 'string')
+        return undefined;
+    const remediation = 'remediation' in err && typeof err.remediation === 'string' ? err.remediation : undefined;
+    return { code: err.code, remediation };
+}
+function describeCause(err) {
+    const text = err instanceof Error ? err.message : String(err);
+    const coded = codedCause(err);
+    return coded === undefined || text.includes(coded.code) ? text : `[${coded.code}] ${text}`;
+}
 export async function loadAppFromFile(filePath) {
     let mod;
     try {
@@ -117,11 +134,13 @@ export async function loadAppFromFile(filePath) {
         mod = await import(pathToFileURL(filePath).href);
     }
     catch (err) {
+        const coded = codedCause(err);
         throw new DotCliError({
             code: DotCliErrorCode.AppImportFailed,
-            message: `Failed to import app file at ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
-            remediation: 'Verify the file path is correct and that the module loads without errors. Run the file directly with `bun <path>` to reproduce.',
-            metadata: { filePath },
+            message: `Failed to import app file at ${filePath}: ${describeCause(err)}`,
+            remediation: coded?.remediation ??
+                'Verify the file path is correct and that the module loads without errors. Run the file directly with `bun <path>` to reproduce.',
+            metadata: coded === undefined ? { filePath } : { filePath, causeCode: coded.code },
             cause: err,
         });
     }
@@ -135,17 +154,19 @@ export async function loadAppFromFile(filePath) {
             candidate = result instanceof Promise ? await result : result;
         }
         catch (err) {
+            const coded = codedCause(err);
             throw new DotCliError({
                 code: DotCliErrorCode.AppImportFailed,
-                message: `Default export function in ${filePath} threw: ${err instanceof Error ? err.message : String(err)}`,
-                remediation: 'Make the default-exported factory return a DotApp or DotAppBuilder. Check for setup errors.',
-                metadata: { filePath },
+                message: `Default export function in ${filePath} threw: ${describeCause(err)}`,
+                remediation: coded?.remediation ??
+                    'Make the default-exported factory return a DotApp or DotAppBuilder. Check for setup errors.',
+                metadata: coded === undefined ? { filePath } : { filePath, causeCode: coded.code },
                 cause: err,
             });
         }
     }
     if (isDotApp(candidate) || isDotAppBuilder(candidate) || isDotAppConfigured(candidate)) {
-        debugDiscover('loaded app from %s', filePath);
+        debugDiscover.debug('loaded app from {filePath}', { filePath });
         return candidate;
     }
     throw new DotCliError({

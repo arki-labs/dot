@@ -41,12 +41,6 @@ export declare function resolveAppFile(options?: DiscoveryOptions): Promise<stri
 declare function isDotAppBuilder(value: unknown): value is DotAppBuilder<Record<string, unknown>>;
 declare function isDotAppConfigured(value: unknown): value is DotAppConfigured<Record<string, unknown>>;
 declare function isDotApp(value: unknown): value is DotApp<Record<string, unknown>>;
-/**
- * Dynamic-import the app file and unwrap its default export into a
- * `DotApp` / `DotAppBuilder`. Functions returning either are awaited.
- *
- * Throws `DotCliError` on any failure path.
- */
 export declare function loadAppFromFile(filePath: string): Promise<DiscoveredApp>;
 /**
  * Combined: resolve the file and load the app. Throws `DotCliError` when no

@@ -12,10 +12,10 @@
 export { defineApp } from './define-app.js';
 export type { DotApp, DotAppBuilder, DotAppConfigured, NormalizeProvides, UseAllAvail, UseAllGuard, UseGuard, } from './define-app.js';
 export { isLazy, lazy, lazyOf, plugin, provide, rename, service, token, DotPluginError } from './plugin-contract.js';
-export type { AnyPlugin, ActionSource, CtxOf, DotConfigureContext, EmptyShape, InferredProvides, KernelCtx, Lazy, LazyService, NeedsShape, NoReservedKeys, Plugin, PluginNeeds, PluginProvides, RenamedProvides, Service, ServiceRecord, Token, WireNeeds, } from './plugin-contract.js';
+export type { AnyPlugin, ActionSource, CtxOf, DotConfigureContext, DotLoggingContext, DotLoggingHandle, EmptyShape, InferredProvides, KernelCtx, Lazy, LazyService, NeedsShape, NoReservedKeys, Plugin, PluginNeeds, PluginProvides, RenamedProvides, Service, ServiceRecord, Token, WireNeeds, } from './plugin-contract.js';
 export { initPlugins } from './init-plugins.js';
 export type { InitPluginsFactory } from './init-plugins.js';
-export { DotLifecycleError, DotLifecycleErrorCode, DOT_LIFECYCLE_HOOKS, } from './lifecycle.js';
+export { DotLifecycleError, DotLifecycleErrorCode, DOT_LIFECYCLE_HOOKS } from './lifecycle.js';
 export type { DotLifecycleHook, DotLifecycleState, DotLifecyclePluginFailure, DotLifecycleErrorCodeValue, } from './lifecycle.js';
 export type { DotAppManifest, ActionDirection, ActionManifest, JsonObject, JsonValue, PluginManifest, ProjectionManifest, ServiceManifest, LifecycleManifest, DependencyEdge, DependencyEdgeKind, ServiceKind, } from './manifest.js';
 export { toJsonObject } from './manifest.js';

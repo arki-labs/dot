@@ -39,35 +39,37 @@ export type DotLifecycleState = 'defined' | 'configured' | 'booted' | 'started' 
 /** Stable error codes for lifecycle failures. */
 export declare const DotLifecycleErrorCode: {
     /** A `configure` hook attempted async work (returned a Promise). */
-    readonly ConfigureAsync: "DOT_LIFECYCLE_E001";
+    readonly ConfigureAsync: 'DOT_LIFECYCLE_E001';
     /** A `configure` hook threw. */
-    readonly ConfigureFailed: "DOT_LIFECYCLE_E002";
+    readonly ConfigureFailed: 'DOT_LIFECYCLE_E002';
     /** A `boot` hook threw. */
-    readonly BootFailed: "DOT_LIFECYCLE_E003";
+    readonly BootFailed: 'DOT_LIFECYCLE_E003';
     /** A `start` hook threw. */
-    readonly StartFailed: "DOT_LIFECYCLE_E004";
+    readonly StartFailed: 'DOT_LIFECYCLE_E004';
     /** One or more `stop` hooks threw — aggregate. */
-    readonly StopFailed: "DOT_LIFECYCLE_E005";
+    readonly StopFailed: 'DOT_LIFECYCLE_E005';
     /** One or more `dispose` hooks threw — aggregate. */
-    readonly DisposeFailed: "DOT_LIFECYCLE_E006";
+    readonly DisposeFailed: 'DOT_LIFECYCLE_E006';
     /** Caller tried to reuse the app after dispose. */
-    readonly ReuseAfterDispose: "DOT_LIFECYCLE_E007";
+    readonly ReuseAfterDispose: 'DOT_LIFECYCLE_E007';
     /** Caller tried to reuse the app after a failed lifecycle. */
-    readonly ReuseAfterFailure: "DOT_LIFECYCLE_E008";
+    readonly ReuseAfterFailure: 'DOT_LIFECYCLE_E008';
     /** Plugin registered twice. */
-    readonly DuplicatePlugin: "DOT_LIFECYCLE_E011";
+    readonly DuplicatePlugin: 'DOT_LIFECYCLE_E011';
     /** A plugin's `needs` entry has no provider among earlier-booted plugins. */
-    readonly UnsatisfiedNeed: "DOT_LIFECYCLE_E012";
+    readonly UnsatisfiedNeed: 'DOT_LIFECYCLE_E012';
     /** A plugin published a wire key that an earlier plugin already provides. */
-    readonly ServiceCollision: "DOT_LIFECYCLE_E013";
+    readonly ServiceCollision: 'DOT_LIFECYCLE_E013';
     /** A needs alias, publish key, or rename target uses the reserved `$` prefix. */
-    readonly ReservedServiceKey: "DOT_LIFECYCLE_E014";
+    readonly ReservedServiceKey: 'DOT_LIFECYCLE_E014';
     /** A lifecycle hook exceeded the app's `hookTimeoutMs` watchdog. */
-    readonly HookTimeout: "DOT_LIFECYCLE_E015";
+    readonly HookTimeout: 'DOT_LIFECYCLE_E015';
     /** Two actions in the same binding use the same id. */
-    readonly DuplicateAction: "DOT_LIFECYCLE_E016";
+    readonly DuplicateAction: 'DOT_LIFECYCLE_E016';
     /** Action metadata is not JSON-round-trip safe. */
-    readonly ActionMetaNotJson: "DOT_LIFECYCLE_E017";
+    readonly ActionMetaNotJson: 'DOT_LIFECYCLE_E017';
+    /** More than one plugin fills the logging slot. */
+    readonly DuplicateLogging: 'DOT_LIFECYCLE_E018';
 };
 export type DotLifecycleErrorCodeValue = (typeof DotLifecycleErrorCode)[keyof typeof DotLifecycleErrorCode];
 /**

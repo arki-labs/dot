@@ -17,7 +17,7 @@
  *  - `stop` and `dispose` run in reverse declaration order and continue
  *    through individual plugin failures, reporting an aggregate error.
  */
-import type { ActionManifest, ProjectionManifest, JsonObject, ServiceKind } from './manifest.js';
+import type { ActionManifest, JsonObject, ProjectionManifest, ServiceKind } from './manifest.js';
 declare const TypeOf: unique symbol;
 /**
  * Phantom type witness for a service. Carries `T` at the type level only —
@@ -233,6 +233,15 @@ export type DotConfigureContext = {
     declareProvides(...capabilities: string[]): void;
 };
 type MaybePromise<T> = T | Promise<T>;
+/** What the kernel passes to a plugin's `logging` factory. */
+export type DotLoggingContext = {
+    /** App name (passed to `defineApp`). */
+    readonly appName: string;
+};
+/** What a `logging` factory returns. The kernel closes it after the app's last lifecycle record. */
+export type DotLoggingHandle = {
+    close(): Promise<void>;
+};
 declare const NeedsSym: unique symbol;
 declare const ProvidesSym: unique symbol;
 /**
@@ -256,6 +265,12 @@ export type Plugin<TNeeds extends ServiceRecord = ServiceRecord, TProvides exten
     readonly actions: readonly ActionSource[];
     /** Mount-time renames: publish key → new wire key (see {@link rename}). */
     readonly renames: Readonly<Record<string, string>>;
+    /**
+     * The logging slot. At most one plugin per app fills it. The kernel calls
+     * the factory before its first lifecycle record and closes the handle after
+     * its last one (after `dispose`, or after a failed `configure`/`boot`/`start`).
+     */
+    readonly logging?: (ctx: DotLoggingContext) => DotLoggingHandle;
     readonly hooks: {
         readonly configure?: (ctx: DotConfigureContext) => void;
         readonly boot?: (ctx: never) => MaybePromise<ServiceRecord | void>;
@@ -312,6 +327,8 @@ export declare function plugin<TShape extends NeedsShape & NoReservedKeys = Empt
     readonly version?: string;
     readonly needs?: TShape;
     readonly actions?: readonly ActionSource[];
+    /** Fill the logging slot (see {@link Plugin.logging}). Called by the kernel, never at import. */
+    readonly logging?: (ctx: DotLoggingContext) => DotLoggingHandle;
     readonly configure?: (ctx: DotConfigureContext) => void;
     readonly boot?: (ctx: CtxOf<TShape> & KernelCtx) => MaybePromise<TProvides | void>;
     readonly start?: (ctx: CtxOf<TShape> & TProvides & KernelCtx) => MaybePromise<void>;

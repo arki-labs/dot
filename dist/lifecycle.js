@@ -62,6 +62,8 @@ export const DotLifecycleErrorCode = {
     DuplicateAction: 'DOT_LIFECYCLE_E016',
     /** Action metadata is not JSON-round-trip safe. */
     ActionMetaNotJson: 'DOT_LIFECYCLE_E017',
+    /** More than one plugin fills the logging slot. */
+    DuplicateLogging: 'DOT_LIFECYCLE_E018',
 };
 /**
  * Structured error thrown for any lifecycle failure or misuse.

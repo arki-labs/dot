@@ -23,7 +23,7 @@
  *    128+n signal encoding — supervisors (systemd, Docker, Coolify)
  *    read it correctly.
  */
-import { Logger } from '@arki/log';
+import { getLogger } from '@arki/log';
 /**
  * Wire termination signals to `app.dispose()`. Returns an unhook function
  * that removes the handlers without disposing — call it if the app is
@@ -39,7 +39,7 @@ export function hookSignals(app, options = {}) {
     const signals = options.signals ?? ['SIGTERM', 'SIGINT'];
     const timeoutMs = options.timeoutMs ?? 10_000;
     const proc = options.proc ?? process;
-    const logger = new Logger('arki:dot:signals', { 'dot.app.name': app.name });
+    const logger = getLogger('arki:dot:signals').with({ 'dot.app.name': app.name });
     const handlers = new Map();
     const unhook = () => {
         for (const [signal, handler] of handlers)

@@ -1,5 +1,12 @@
 /**
- * `dot new <app>` — scaffold a minimal DOT app.
+ * `dot new <app>` — scaffold a DOT app from a bundled template.
+ *
+ * Two templates ship with the package (`--template <name>`):
+ *
+ *   - `stack` (default) — a full-stack app: TanStack Start + oRPC +
+ *     Drizzle/Postgres via `@arki/db` + `@arki/journal`, composed with
+ *     `@arki/dot`, styled with `@arki/ui` and the workbench design system.
+ *   - `minimal` — the smallest DOT app: `defineApp` + `@arki/env`.
  *
  * Two-phase: we first build an in-memory list of {@link FileOperation}
  * entries describing every file the scaffold WOULD write (template
@@ -12,7 +19,7 @@
  * which files will land, with sha256 hashes so they can verify the
  * post-run filesystem matches the plan.
  *
- * Templates live at `packages/dot/templates/app-minimal/` and use
+ * Templates live at `packages/dot/templates/app-<name>/` and use
  * `.tmpl` suffixes + `{{name}}`-style placeholders. The suffix is
  * stripped during scaffolding so `package.json.tmpl` becomes
  * `package.json` on disk.
@@ -28,6 +35,12 @@ import type { DotNewEnvelope } from './json.js';
  * with Bun first.
  */
 export type PackageManager = 'npm' | 'pnpm' | 'bun';
+/** Template names accepted by `--template`. */
+export declare const TEMPLATE_NAMES: readonly ['stack', 'minimal'];
+/** A bundled template. */
+export type TemplateName = (typeof TEMPLATE_NAMES)[number];
+/** The template `dot new` uses when `--template` is omitted. */
+export declare const DEFAULT_TEMPLATE: TemplateName;
 /** Options accepted by {@link runNew}. */
 export type RunNewOptions = {
     /** Application name (becomes `package.json#name`). */
@@ -44,6 +57,11 @@ export type RunNewOptions = {
     readonly target?: string;
     /** Package manager hint surfaced in README/AGENTS.md. Defaults to `bun`. */
     readonly pm?: PackageManager;
+    /**
+     * Bundled template to scaffold (`stack` or `minimal`). Defaults to
+     * {@link DEFAULT_TEMPLATE}. Any other value fails with `DOT_CLI_E005`.
+     */
+    readonly template?: string;
     /** When true, only plan operations — write nothing. */
     readonly dryRun?: boolean;
     /** When true, emit JSON to `out`. Otherwise emit progress lines. */
@@ -58,20 +76,31 @@ export type RunNewOptions = {
     readonly now?: () => Date;
     /**
      * Override template root. Used by tests; production callers should
-     * leave this undefined so the bundled `templates/app-minimal/`
+     * leave this undefined so the bundled `templates/app-<template>/`
      * directory is used.
      */
     readonly templateRoot?: string;
     /**
-     * Version values inlined into the generated `package.json`. The
-     * defaults track the current `@arki/dot` + `@arki/env` releases.
+     * Version values inlined into the generated `package.json`. `dot`
+     * defaults to this package's own version; the others default to
+     * {@link TEMPLATE_VERSIONS} (see `versions.ts`).
      */
     readonly versions?: {
         readonly dot?: string;
         readonly env?: string;
         readonly zod?: string;
+        readonly log?: string;
+        readonly db?: string;
+        readonly journal?: string;
+        readonly ui?: string;
+        readonly designSystems?: string;
     };
 };
+/**
+ * Validate a `--template` value. Omitted means {@link DEFAULT_TEMPLATE}.
+ * Exported so tests can assert the error without running a scaffold.
+ */
+export declare function resolveTemplateName(value: string | undefined): TemplateName;
 /**
  * Resolve the absolute target path for a given app + options bundle.
  * Exported so tests can assert resolution behaviour without running the
