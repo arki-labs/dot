@@ -1,33 +1,54 @@
 /**
- * Test harness for unit-testing DOT plugins.
+ * Test builders that boot units against fakes: `testUnit`, `testApp` and `bootTestApp`.
  *
- * Provides `testApp` — a convenience wrapper that lets plugin authors verify
+ * Provides `testApp` — a convenience wrapper that lets unit authors verify
  * lifecycle behaviour, registration, and service publishing without dragging
  * in concrete framework dependencies.
  *
- * NOTE: `testApp` takes an erased plugin array, so the compile-time wiring
- * guard does not apply here — the kernel's runtime validation (unsatisfied
- * needs, collisions) still does. Use `defineApp(...).use(...)` chains in
- * tests that should exercise the type-level guard.
+ * Tuples use the compile-time wiring guard. Runtime-built arrays use the
+ * kernel's validation of missing needs and collisions at boot.
  *
  * @example
- *   import { testApp, plugin } from '@arki/dot';
+ *   import { bootTestApp, infra } from '@arki/dot';
+ *   import { orThrow } from '@arki/failure';
  *
- *   const myPlugin = plugin({
+ *   const myUnit = infra({
  *     name: 'counter',
- *     boot: () => ({ counter: { value: 0 } }),
+ *     provides: { counter: () => ({ value: 0 }) },
  *   });
  *
  *   it('publishes a counter service', async () => {
- *     const app = await bootTestApp<{ counter: { value: number } }>([myPlugin]);
+ *     const app = orThrow(await bootTestApp([myUnit])); // app.services typed from the units
  *     expect(app.services.counter.value).toBe(0);
  *     await app.dispose();
  *   });
  */
 
-import type { DotApp, DotAppBuilder } from './define-app.js';
-import type { AnyPlugin, EmptyShape, Plugin, ServiceRecord, Token } from './plugin-contract.js';
-import { defineApp } from './define-app.js';
+import type { Failure } from '@arki/failure';
+
+import type { DotAppLifecycle, ListGuard, UseAllAvail, UseAllGuard } from './define-app.js';
+import type {
+  AnyUnit,
+  EmptyPhases,
+  EmptyShape,
+  Handle,
+  Handles,
+  InferredOwnership,
+  Unit,
+  UnitCloseFailure,
+  UnitNeeds,
+  UnitOpenFailure,
+  UnitPhaseFailures,
+  UnitPhases,
+  UnitProvides,
+  UnitSourceGuard,
+  ProvidedValues,
+  RuntimeUnit,
+  ServiceRecord,
+  Token,
+} from './unit-contract.js';
+import { mountUnits } from './define-app.js';
+import { createUnitRuntime, handleOf } from './unit-contract.js';
 
 export type TestAppOptions = {
   /** App name used in the manifest. Defaults to `'test-app'`. */
@@ -36,119 +57,190 @@ export type TestAppOptions = {
   config?: Readonly<Record<string, unknown>>;
 };
 
-/**
- * Guard-free view of the builder for erased plugin arrays. The runtime `use`
- * implementation accepts the missing guard argument (it is type-level
- * only), so this seam is safe — the kernel still validates wiring at boot.
- */
-type LooseBuilder = {
-  use(plugin: AnyPlugin): LooseBuilder;
-};
+/** Runtime operation lists retain the ownership inferred at their authoring boundaries. */
+function runtimeUnits<const Units extends readonly AnyUnit[]>(
+  plugins: Units,
+): readonly RuntimeUnit<
+  UnitOpenFailure<Units[number]>,
+  UnitCloseFailure<Units[number]>,
+  UnitPhaseFailures<Units[number]>
+>[];
+function runtimeUnits(units: readonly AnyUnit[]): readonly AnyUnit[] {
+  return units;
+}
 
-/**
- * Build a DOT app builder pre-populated with the given plugins, ready to
- * `.configure()`, `.boot()` or `.start()` from a test.
- */
-export function testApp<TServices extends ServiceRecord = EmptyShape>(
-  plugins: readonly AnyPlugin[] = [],
-  options: TestAppOptions = {},
-): DotAppBuilder<TServices> {
-  let builder: unknown = defineApp(options.name ?? 'test-app', { config: options.config });
-  for (const p of plugins) {
-    builder = (builder as LooseBuilder).use(p);
-  }
-  return builder as DotAppBuilder<TServices>;
+/** Project one checked unit onto the execution contract its callbacks own. */
+function runtimeUnit<P extends AnyUnit>(
+  plugin: P,
+): RuntimeUnit<UnitOpenFailure<P>, UnitCloseFailure<P>, UnitPhaseFailures<P>>;
+function runtimeUnit(unit: AnyUnit): AnyUnit {
+  return unit;
 }
 
 /**
- * Convenience: build, boot, return the running app. Caller is responsible for
- * calling `app.dispose()` when finished.
+ * What `testApp(units)` exposes as `app.services`: the services the tuple
+ * accumulates, as `.infra(...)` would type them. A runtime-built array
+ * (`feature.units()`) has no tuple to read, so it gets the open record.
  */
-export async function bootTestApp<TServices extends ServiceRecord = EmptyShape>(
-  plugins: readonly AnyPlugin[] = [],
+export type TestAppServices<TUnits extends readonly AnyUnit[]> = number extends TUnits['length']
+  ? ServiceRecord
+  : UseAllAvail<EmptyShape, TUnits>;
+
+/**
+ * The `.infra(...)` wiring check on the argument, minus the tuple requirement:
+ * a test may mount a runtime-built array and let the kernel check it at boot.
+ */
+type TestAppGuard<TUnits extends readonly AnyUnit[]> = number extends TUnits['length']
+  ? ListGuard<UnitSourceGuard<TUnits[number]>>
+  : ListGuard<UseAllGuard<EmptyShape, TUnits>>;
+
+/**
+ * Build a DOT app builder pre-populated with the given units, ready to
+ * `.configure()`, `.boot()` or `.start()` from a test. The services are read
+ * off the units — `testApp([database]).boot()` gives `app.services.db` —
+ * and a tuple that would not mount (a need before its provider, a wire key
+ * provided twice) is a compile error on the argument.
+ */
+export function testApp<const TUnits extends readonly AnyUnit[] = readonly []>(
+  units?: TUnits & TestAppGuard<TUnits>,
   options: TestAppOptions = {},
-): Promise<DotApp<TServices>> {
-  return testApp<TServices>(plugins, options).boot();
+) {
+  return mountUnits<
+    UnitOpenFailure<TUnits[number]>,
+    UnitCloseFailure<TUnits[number]>,
+    TestAppServices<TUnits>,
+    UnitPhaseFailures<TUnits[number]>
+  >(options.name ?? 'test-app', runtimeUnits(units ?? []), { config: options.config });
+}
+
+/** Build and boot an app, returning declared ownership failures to its caller. */
+export function bootTestApp<const TUnits extends readonly AnyUnit[] = readonly []>(
+  units?: TUnits & TestAppGuard<TUnits>,
+  options: TestAppOptions = {},
+) {
+  return testApp<TUnits>(units, options).boot();
 }
 
 /**
- * Rest-tuple guard for {@link TestPluginBuilder.boot} — the same trick the app
- * builder's `UseGuard` uses. While any need is still unprovided, `boot()`
- * demands an impossible second argument, so the call site fails with
- * "Expected 2 arguments, but got 1" and the error payload names the
- * missing wire keys and their types.
+ * `this` type for {@link TestUnitBuilder.boot}: the builder itself once every
+ * need is provided, else a record naming the missing wire keys and their
+ * types. A `this` parameter puts that record in the error text ("The 'this'
+ * context of type … is not assignable to method's 'this' of type { 'DOT-TEST:
+ * …' }"), on the `.boot()` call.
  */
-type TestPluginBootGuard<TRemaining extends ServiceRecord> = keyof TRemaining extends never
-  ? readonly []
-  : readonly [
-      needs: {
-        readonly 'DOT-TEST: plugin needs still unprovided — call .provide() for each': {
-          readonly [K in keyof TRemaining]: TRemaining[K];
-        };
-      },
-    ];
+type BootReady<TRemaining extends ServiceRecord, TSelf> = keyof TRemaining extends never
+  ? TSelf
+  : {
+      readonly 'DOT-TEST: unit needs still unprovided — call .provide() for each': {
+        readonly [K in keyof TRemaining]: TRemaining[K];
+      };
+    };
 
 /**
- * Typed unit-test builder for a single plugin — see {@link testPlugin}.
+ * Typed unit-test builder for a single unit — see {@link testUnit}.
  *
  * `TRemaining` tracks the wire keys not yet covered by `.provide()`;
  * `TServices` accumulates what the booted app will expose (the fakes plus
- * the plugin's own provides).
+ * the unit's own provides).
  */
-export type TestPluginBuilder<TRemaining extends ServiceRecord, TServices extends ServiceRecord> = {
+type TestUnitLifecycle<
+  Services extends ServiceRecord,
+  Open extends Failure,
+  Close extends Failure,
+  Fakes extends ServiceRecord,
+  Phases extends UnitPhases,
+> = DotAppLifecycle<
+  Services,
+  Open | InferredOwnership<Fakes, void>['open'],
+  Close | InferredOwnership<Fakes, void>['close'],
+  Phases
+>;
+
+export type TestUnitBuilder<
+  TRemaining extends ServiceRecord,
+  TServices extends ServiceRecord,
+  TOpen extends Failure = never,
+  TClose extends Failure = never,
+  TFakes extends ServiceRecord = EmptyShape,
+  TPhases extends UnitPhases = EmptyPhases,
+> = {
   /**
    * Satisfy one need directly with a fake. Token form — the token names
    * the wire key and carries the type:
    *
    * ```ts
-   * testPlugin(reports).provide(Db, fakeDb)
+   * testUnit(reports).provide(Db, fakeDb)
    * ```
    */
   provide<K extends keyof TRemaining & string, T extends TRemaining[K]>(
     token: Token<T, K>,
     value: T,
-  ): TestPluginBuilder<Omit<TRemaining, K>, TServices & Readonly<Record<K, T>>>;
+  ): TestUnitBuilder<
+    Omit<TRemaining, K>,
+    TServices & Readonly<Record<K, T>>,
+    TOpen,
+    TClose,
+    TFakes & Readonly<Record<K, T>>,
+    TPhases
+  >;
   /**
    * Satisfy one need directly with a fake. Key form — for anonymous
    * `service<T>()` needs, where the wire key is the property name:
    *
    * ```ts
-   * testPlugin(billing).provide('db', fakeDb)
+   * testUnit(billing).provide('db', fakeDb)
    * ```
    */
-  provide<K extends keyof TRemaining & string>(
+  provide<K extends keyof TRemaining & string, T extends TRemaining[K]>(
     key: K,
-    value: TRemaining[K],
-  ): TestPluginBuilder<Omit<TRemaining, K>, TServices & Readonly<Record<K, TRemaining[K]>>>;
-  /** Boot the plugin against the provided fakes. Compile error until every need is provided. */
-  boot(...guard: TestPluginBootGuard<TRemaining>): Promise<DotApp<TServices>>;
-  /** Boot + start. Same guard as {@link TestPluginBuilder.boot}. */
-  start(...guard: TestPluginBootGuard<TRemaining>): Promise<DotApp<TServices>>;
+    value: T,
+  ): TestUnitBuilder<
+    Omit<TRemaining, K>,
+    TServices & Readonly<Record<K, T>>,
+    TOpen,
+    TClose,
+    TFakes & Readonly<Record<K, T>>,
+    TPhases
+  >;
+  /** Boot the unit against the provided fakes. Compile error until every need is provided. */
+  boot(
+    this: BootReady<TRemaining, TestUnitBuilder<TRemaining, TServices, TOpen, TClose, TFakes, TPhases>>,
+  ): ReturnType<TestUnitLifecycle<TServices, TOpen, TClose, TFakes, TPhases>['boot']>;
+  /** Boot + start. Same guard as {@link TestUnitBuilder.boot}. */
+  start(
+    this: BootReady<TRemaining, TestUnitBuilder<TRemaining, TServices, TOpen, TClose, TFakes, TPhases>>,
+  ): ReturnType<TestUnitLifecycle<TServices, TOpen, TClose, TFakes, TPhases>['start']>;
 };
 
-/** Internal accumulating state for {@link testPlugin}. */
-type TestPluginState = {
-  readonly plugin: AnyPlugin;
-  readonly fakes: Readonly<Record<string, unknown>>;
+/** Internal accumulating state for {@link testUnit}. */
+type TestUnitState<
+  Open extends Failure,
+  Close extends Failure,
+  Fakes extends ServiceRecord,
+  Phases extends UnitPhases,
+> = {
+  readonly plugin: RuntimeUnit<Open, Close, Phases>;
+  readonly fakes: Fakes;
   readonly options: TestAppOptions;
 };
 
 /**
- * Unit-test a single plugin with **typed overrides** — the compile-checked
+ * Unit-test a single unit with **typed overrides** — the compile-checked
  * counterpart to {@link testApp}'s erased arrays.
  *
- * Each `.provide()` satisfies one of the plugin's needs directly (no real
- * provider plugin, no dependency chain) and removes it from the builder's
+ * Each `.provide()` satisfies one of the unit's needs directly (no real
+ * provider unit, no dependency chain) and removes it from the builder's
  * remaining-needs type. `boot()` only compiles once every need is covered,
  * and a fake of the wrong shape fails at the `.provide()` call site:
  *
  * ```ts
- * import { testPlugin } from '@arki/dot/test-harness';
+ * import { testUnit } from '@arki/dot/test-harness';
+ * import { orThrow } from '@arki/failure';
  *
- * const app = await testPlugin(catalog)
+ * const app = orThrow(await testUnit(catalog)
  *   .provide(Db, fakeDb)          // token need
  *   .provide('cache', fakeKv)     // anonymous need — wire key is the alias
- *   .boot();
+ *   .boot());
  *
  * expect(app.services.catalog.list()).toEqual([]);
  * await app.dispose();
@@ -157,56 +249,118 @@ type TestPluginState = {
  * `service.lazy<T>()` needs accept either a plain `T` fake (the kernel
  * lifts it) or a `Lazy<T>` handle (`lazyOf(value)` is handy here).
  * Lifecycle semantics are the real kernel's — the fakes are published by a
- * synthetic first plugin, so reverse-order teardown and lazy auto-dispose
+ * synthetic first unit, so reverse-order teardown and lazy auto-dispose
  * behave exactly as in production.
  */
-export function testPlugin<TNeeds extends ServiceRecord, TProvides extends ServiceRecord>(
-  plugin: Plugin<TNeeds, TProvides>,
+export function testUnit<const P extends AnyUnit>(
+  unit: P & ListGuard<UnitSourceGuard<P>>,
   options: TestAppOptions = {},
-): TestPluginBuilder<TNeeds, TProvides> {
-  // Erasure seam — same boundary as `makeBuilder` in define-app.ts: the
-  // runtime impl is untyped, the type parameters do all the guarding.
-  return makeTestPluginBuilder({ plugin: plugin as AnyPlugin, fakes: {}, options }) as TestPluginBuilder<TNeeds, TProvides>;
+) {
+  return makeTestUnitBuilder<
+    UnitNeeds<P>,
+    UnitProvides<P>,
+    UnitOpenFailure<P>,
+    UnitCloseFailure<P>,
+    EmptyShape,
+    UnitPhaseFailures<P>
+  >({
+    plugin: runtimeUnit<P>(unit),
+    fakes: {},
+    options,
+  });
+}
+
+/** The factories return their original fake values; only their computed key record is remapped. */
+function fakeUnit<Fakes extends ServiceRecord>(
+  name: string,
+  fakes: Fakes,
+): Omit<Unit<EmptyShape, ProvidedValues<Fakes>, EmptyShape, string, InferredOwnership<Fakes, void>>, 'hooks'> & {
+  readonly hooks: EmptyShape;
+} {
+  const entries = Object.entries(fakes);
+  const factories = Object.fromEntries(entries.map(([key, value]) => [key, () => value])) as {
+    readonly [K in keyof Fakes]: () => Fakes[K];
+  };
+  return {
+    name,
+    needs: {},
+    actions: [],
+    renames: {},
+    provides: Object.fromEntries(entries.map(([key]) => [key, handleOf(key, name)])) as Handles<ProvidedValues<Fakes>>,
+    factories,
+    runtime: createUnitRuntime(),
+    hooks: {},
+  };
+}
+
+/** Generic state keeps closed operations typed while fakes accumulate by wire key. */
+function makeTestUnitBuilder<
+  Remaining extends ServiceRecord,
+  Services extends ServiceRecord,
+  Open extends Failure,
+  Close extends Failure,
+  Fakes extends ServiceRecord,
+  Phases extends UnitPhases,
+>(
+  state: TestUnitState<Open, Close, Fakes, Phases>,
+): TestUnitBuilder<Remaining, Services, Open, Close, Fakes, Phases> {
+  const appBuilder = () => {
+    const units: RuntimeUnit<
+      Open | InferredOwnership<Fakes, void>['open'],
+      Close | InferredOwnership<Fakes, void>['close'],
+      Phases
+    >[] = [];
+    if (Object.keys(state.fakes).length > 0) units.push(fakeUnit(`test:fakes(${state.plugin.name})`, state.fakes));
+    units.push(state.plugin);
+    return mountUnits<
+      Open | InferredOwnership<Fakes, void>['open'],
+      Close | InferredOwnership<Fakes, void>['close'],
+      Services,
+      Phases
+    >(state.options.name ?? `test:${state.plugin.name}`, units, { config: state.options.config });
+  };
+
+  function provide<K extends keyof Remaining & string, Value extends Remaining[K]>(
+    tokenOrKey: Token<Value, K> | K,
+    value: Value,
+  ) {
+    const key = typeof tokenOrKey === 'string' ? tokenOrKey : tokenOrKey.key;
+    // Computed-key construction preserves the same key and value supplied by provide().
+    const fakes = { ...state.fakes, [key]: value } as Fakes & Readonly<Record<K, Value>>;
+    return makeTestUnitBuilder<
+      Omit<Remaining, K>,
+      Services & Readonly<Record<K, Value>>,
+      Open,
+      Close,
+      typeof fakes,
+      Phases
+    >({
+      ...state,
+      fakes,
+    });
+  }
+
+  return {
+    provide,
+    boot: () => appBuilder().boot(),
+    start: () => appBuilder().start(),
+  };
 }
 
 /**
- * Erased implementation behind {@link testPlugin}. Mirrors `makeBuilder` in
- * `define-app.ts`: the runtime is untyped, the single cast at the return
- * is the seam, and the type parameters do all the guarding.
+ * A unit that provides one fake under a real handle's wire key — for
+ * app-level tests that mount the real features against fakes:
+ *
+ * ```ts
+ * defineApp('test').infra(fake(database.provides.db, db)).features([...features])
+ * ```
+ *
+ * The fake is type-checked against the handle: a wrong-shaped value fails
+ * at the call site. The unit is named `fake:<key>`.
  */
-function makeTestPluginBuilder(state: TestPluginState): TestPluginBuilder<ServiceRecord, ServiceRecord> {
-  const bootApp = async (): Promise<DotApp<ServiceRecord>> => {
-    const plugins: AnyPlugin[] = [];
-    if (Object.keys(state.fakes).length > 0) {
-      const fakes = { ...state.fakes };
-      plugins.push({
-        name: `test:fakes(${state.plugin.name})`,
-        needs: {},
-        actions: [],
-        renames: {},
-        hooks: { boot: () => fakes },
-      });
-    }
-    plugins.push(state.plugin);
-    return testApp<ServiceRecord>(plugins, {
-      name: state.options.name ?? `test:${state.plugin.name}`,
-      ...(state.options.config === undefined ? {} : { config: state.options.config }),
-    }).boot();
-  };
-
-  const impl = {
-    provide(tokenOrKey: Token<unknown, string> | string, value: unknown) {
-      const key = typeof tokenOrKey === 'string' ? tokenOrKey : tokenOrKey.key;
-      return makeTestPluginBuilder({ ...state, fakes: { ...state.fakes, [key]: value } });
-    },
-    async boot(..._guard: readonly unknown[]) {
-      return bootApp();
-    },
-    async start(..._guard: readonly unknown[]) {
-      const app = await bootApp();
-      await app.start();
-      return app;
-    },
-  };
-  return impl as TestPluginBuilder<ServiceRecord, ServiceRecord>;
+export function fake<T, K extends string, Value extends NoInfer<T>>(handle: Handle<T, K>, value: Value) {
+  // Erasure seam: the factory record is built under `handle.key` at
+  // runtime; its type is exactly `{ [handle.key]: Value }`.
+  const fakes = { [handle.key]: value } as Readonly<Record<K, Value>>;
+  return fakeUnit(`fake:${handle.key}`, fakes);
 }

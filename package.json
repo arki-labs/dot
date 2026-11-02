@@ -1,6 +1,6 @@
 {
   "name": "@arki/dot",
-  "version": "0.6.1",
+  "version": "0.10.0",
   "description": "TypeScript-first application composition framework for the ARKI package family — lifecycle-aware plugins, deterministic boot order, manifest/diagnostics envelopes, and an agent-native CLI. A DOT app is the sum of its plugins.",
   "license": "MIT",
   "repository": {
@@ -31,15 +31,30 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./unit": {
+      "types": "./dist/unit.d.ts",
+      "import": "./dist/unit.js",
+      "default": "./dist/unit.js"
+    },
     "./plugin": {
       "types": "./dist/plugin.d.ts",
       "import": "./dist/plugin.js",
       "default": "./dist/plugin.js"
     },
+    "./env": {
+      "types": "./dist/env.d.ts",
+      "import": "./dist/env.js",
+      "default": "./dist/env.js"
+    },
     "./feature": {
       "types": "./dist/feature.d.ts",
       "import": "./dist/feature.js",
       "default": "./dist/feature.js"
+    },
+    "./orpc": {
+      "types": "./dist/orpc.d.ts",
+      "import": "./dist/orpc.js",
+      "default": "./dist/orpc.js"
     },
     "./package.json": "./package.json",
     "./cli": {
@@ -52,14 +67,40 @@
       "import": "./dist/log.js",
       "default": "./dist/log.js"
     },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "import": "./dist/runtime.js",
+      "default": "./dist/runtime.js"
+    },
     "./test-harness": {
       "types": "./dist/test-harness.d.ts",
       "import": "./dist/test-harness.js",
       "default": "./dist/test-harness.js"
+    },
+    "./action": {
+      "types": "./dist/action.d.ts",
+      "import": "./dist/action.js",
+      "default": "./dist/action.js"
+    },
+    "./execute": {
+      "types": "./dist/execute.d.ts",
+      "import": "./dist/execute.js",
+      "default": "./dist/execute.js"
+    },
+    "./telemetry": {
+      "types": "./dist/telemetry.d.ts",
+      "import": "./dist/telemetry.js",
+      "default": "./dist/telemetry.js"
+    },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "import": "./dist/vite.js",
+      "default": "./dist/vite.js"
     }
   },
   "files": [
     "dist/**",
+    "bin/**",
     "src/**",
     "!src/**/*.test.*",
     "!src/**/*.spec.*",
@@ -67,18 +108,41 @@
     "!src/**/test/**",
     "!src/**/__tests__/**",
     "templates/**",
+    "docs/**",
+    "!docs/plans/**",
+    "llms.txt",
     "README.md",
+    "CHANGELOG.md",
+    "AGENTS.md",
     "LICENSE",
     "package.json"
   ],
   "bin": {
-    "dot": "./dist/cli/index.js"
+    "dot": "./bin/dot.js"
   },
   "dependencies": {
-    "@arki/contracts": "0.1.0",
-    "@arki/log": "0.1.0",
+    "@arki/async": "0.3.0",
+    "@arki/cli": "0.2.0",
+    "@arki/clock": "0.2.0",
+    "@arki/contracts": "0.4.1",
+    "@arki/env": "0.2.0",
+    "@arki/failure": "0.3.0",
+    "@arki/log": "0.4.0",
+    "@arki/schema": "0.3.0",
     "@opentelemetry/api": "^1.9.1",
     "zod": "4.6.5"
+  },
+  "peerDependencies": {
+    "@orpc/server": "^1.15.5",
+    "vite": "^7 || ^8"
+  },
+  "peerDependenciesMeta": {
+    "@orpc/server": {
+      "optional": true
+    },
+    "vite": {
+      "optional": true
+    }
   },
   "publishConfig": {
     "access": "public"

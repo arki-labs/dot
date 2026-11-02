@@ -3,7 +3,7 @@
  *
  * Where the manifest describes the static shape of an app, a
  * `DotDiagnosticsSnapshot` is a point-in-time observability record: the
- * lifecycle state of the app and every plugin, plus structured issues with
+ * lifecycle state of the app and every unit, plus structured issues with
  * remediation guidance.
  *
  * CONTRACT: `DotDiagnosticsSnapshot` always exposes the same five arrays

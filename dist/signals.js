@@ -23,14 +23,27 @@
  *    128+n signal encoding — supervisors (systemd, Docker, Coolify)
  *    read it correctly.
  */
+import { isFailure } from '@arki/failure';
 import { getLogger } from '@arki/log';
+/** The global `process` as a {@link SignalTarget}, or `undefined` where the runtime has none. Read at call time, never at import. */
+function globalProcessTarget() {
+    const proc = globalThis.process;
+    if (proc === undefined)
+        return undefined;
+    return {
+        pid: proc.pid,
+        once: (event, listener) => proc.once(event, listener),
+        off: (event, listener) => proc.off(event, listener),
+        kill: (pid, signal) => proc.kill(pid, signal),
+    };
+}
 /**
  * Wire termination signals to `app.dispose()`. Returns an unhook function
  * that removes the handlers without disposing — call it if the app is
  * torn down through another path first.
  *
  * ```ts
- * const app = await defineApp('shop').use(...).start();
+ * const app = await defineApp('shop').infra(...).start();
  * hookSignals(app);                          // SIGTERM/SIGINT → drain → exit
  * hookSignals(app, { timeoutMs: 30_000 });   // slower drain budget
  * ```
@@ -38,7 +51,12 @@ import { getLogger } from '@arki/log';
 export function hookSignals(app, options = {}) {
     const signals = options.signals ?? ['SIGTERM', 'SIGINT'];
     const timeoutMs = options.timeoutMs ?? 10_000;
-    const proc = options.proc ?? process;
+    const proc = options.proc ?? globalProcessTarget();
+    // Browsers and Hermes have no process signals: nothing to hook, so the unhook does nothing.
+    if (proc === undefined)
+        return () => {
+            /* nothing was hooked */
+        };
     const logger = getLogger('arki:dot:signals').with({ 'dot.app.name': app.name });
     const handlers = new Map();
     const unhook = () => {
@@ -71,11 +89,17 @@ async function drainAndReraise(args) {
             timer.unref();
     });
     try {
-        const outcome = await Promise.race([app.dispose().then(() => 'disposed'), timedOut]);
+        const outcome = await Promise.race([app.dispose(), timedOut]);
         if (outcome === 'timeout') {
             logger.error('drain timed out — terminating without a clean dispose', {
                 'dot.signal': signal,
                 'dot.drain.timeout.ms': timeoutMs,
+            });
+        }
+        else if (isFailure(outcome)) {
+            logger.error('dispose failed during drain — terminating', {
+                'dot.signal': signal,
+                'dot.failure.code': outcome.code,
             });
         }
         else {

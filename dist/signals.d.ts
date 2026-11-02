@@ -23,6 +23,7 @@
  *    128+n signal encoding — supervisors (systemd, Docker, Coolify)
  *    read it correctly.
  */
+import type { Failure } from '@arki/failure';
 /**
  * The slice of `process` the signal hook touches. Injectable so tests can
  * drive signals through a fake without terminating the test runner —
@@ -30,8 +31,8 @@
  */
 export type SignalTarget = {
     readonly pid: number;
-    once(event: string, listener: (...args: never[]) => void): unknown;
-    off(event: string, listener: (...args: never[]) => void): unknown;
+    once(event: string, listener: () => void): unknown;
+    off(event: string, listener: () => void): unknown;
     kill(pid: number, signal?: string): unknown;
 };
 export type HookSignalsOptions = {
@@ -42,13 +43,13 @@ export type HookSignalsOptions = {
      * terminated anyway. Default: 10 000 ms.
      */
     readonly timeoutMs?: number;
-    /** Test seam — a process-like target. Default: the real `process`. */
+    /** Test seam — a process-like target. Default: the global `process`, when the runtime has one. */
     readonly proc?: SignalTarget;
 };
 /** The app surface the hook needs — satisfied by any `DotApp`. */
 export type Disposable = {
     readonly name: string;
-    dispose(): Promise<void>;
+    dispose(): Promise<void | Failure>;
 };
 /**
  * Wire termination signals to `app.dispose()`. Returns an unhook function
@@ -56,7 +57,7 @@ export type Disposable = {
  * torn down through another path first.
  *
  * ```ts
- * const app = await defineApp('shop').use(...).start();
+ * const app = await defineApp('shop').infra(...).start();
  * hookSignals(app);                          // SIGTERM/SIGINT → drain → exit
  * hookSignals(app, { timeoutMs: 30_000 });   // slower drain budget
  * ```

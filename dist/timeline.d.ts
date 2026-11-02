@@ -1,14 +1,14 @@
 /**
  * ASCII waterfall renderer for DOT lifecycle diagnostics.
  *
- * Given a `DotDiagnosticsSnapshot`, builds a compact per-phase, per-plugin
+ * Given a `DotDiagnosticsSnapshot`, builds a compact per-phase, per-unit
  * duration chart suitable for printing in a terminal or embedding in a
  * `dot doctor` text report. No colour, no Unicode beyond `█` so the
  * output stays clean in log aggregators and CI.
  *
  * @example
  * ```
- * Timeline: my-app (state=booted)
+ * Timeline: pizzeria (state=booted)
  * ─────────────────────────────────────────────────────────
  * configure
  *   env       0.5ms  █
@@ -29,7 +29,7 @@ export type RenderTimelineOptions = {
     /** Maximum bar width in characters (default `50`). */
     readonly barWidth?: number;
     /**
-     * When `true`, also emit any plugin's diagnostic `issues[]` underneath
+     * When `true`, also emit any unit's diagnostic `issues[]` underneath
      * the bar so failure reasons are visible in the timeline view.
      * Default `true`.
      */

@@ -1,38 +1,26 @@
 /**
- * Renderer for `dot explain --as <format>`.
- *
- * The kernel owns selection, app-file-relative module resolution, import, and
- * envelope printing. The adapter owns the projection module and document
- * vocabulary.
+ * `dot explain --as <format>`: select the projection the app registered,
+ * resolve its module relative to the app file, import it and run
+ * `project(manifest)`. The adapter owns the projection module and its
+ * document vocabulary; every failure here is returned, not thrown.
  */
 import { createRequire } from 'node:module';
-import { dirname, isAbsolute } from 'node:path';
+import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { DotCliError, DotCliErrorCode } from './error-codes.js';
-const defaultOut = (line) => {
-    process.stdout.write(line);
-};
-function nowIso(opts) {
-    const factory = opts.now ?? (() => new Date());
-    return factory().toISOString();
-}
+import { isFailure } from '@arki/failure';
+import { is, plainObjectSchema, recordSchema } from '@arki/schema';
+import { ProjectionConflict, ProjectionExecutionFailed, ProjectionImportFailed, ProjectionNotFound, } from './failures.js';
 function isJsonPrimitive(value) {
     return value === null || typeof value === 'string' || typeof value === 'boolean' || typeof value === 'number';
-}
-function isPlainObject(value) {
-    if (typeof value !== 'object' || value === null || Array.isArray(value))
-        return false;
-    const prototype = Object.getPrototypeOf(value);
-    return prototype === Object.prototype || prototype === null;
 }
 function isJsonValue(value) {
     if (isJsonPrimitive(value))
         return typeof value !== 'number' || Number.isFinite(value);
     if (Array.isArray(value))
-        return value.every(isJsonValue);
-    if (!isPlainObject(value))
+        return value.every(item => isJsonValue(item));
+    if (!is(value, plainObjectSchema))
         return false;
-    return Object.values(value).every(isJsonValue);
+    return Object.values(value).every(item => isJsonValue(item));
 }
 function jsonDeepEqual(left, right) {
     if (isJsonPrimitive(left) || isJsonPrimitive(right))
@@ -42,7 +30,7 @@ function jsonDeepEqual(left, right) {
             return false;
         return left.every((value, index) => jsonDeepEqual(value, right[index]));
     }
-    if (!isPlainObject(left) || !isPlainObject(right))
+    if (!is(left, plainObjectSchema) || !is(right, plainObjectSchema))
         return false;
     const leftEntries = Object.entries(left);
     const rightEntries = Object.entries(right);
@@ -73,30 +61,19 @@ function toProjectionJsonValue(value) {
 }
 function selectProjection(manifest, format) {
     const projections = manifest.projections.filter(projection => projection.format === format);
-    if (projections.length === 0) {
-        const formats = [...new Set(manifest.projections.map(projection => projection.format))];
-        throw new DotCliError({
-            code: DotCliErrorCode.ProjectionNotFound,
-            message: `No projection is registered for format "${format}".`,
-            remediation: formats.length === 0
-                ? 'Register an adapter that contributes this projection format, or remove --as.'
-                : `Use one of the registered formats (${formats.join(', ')}), or mount the adapter that provides "${format}".`,
-            metadata: { format, registeredFormats: formats },
-        });
+    const [first] = projections;
+    if (first === undefined) {
+        const registeredFormats = [...new Set(manifest.projections.map(projection => projection.format))];
+        return ProjectionNotFound({ format, registeredFormats });
     }
     const modules = new Set(projections.map(projection => projection.module));
     if (modules.size > 1) {
-        throw new DotCliError({
-            code: DotCliErrorCode.ProjectionConflict,
-            message: `Multiple projection modules are registered for format "${format}".`,
-            remediation: 'Only one module may own a projection format. Remove one registration, or make both plugins register the same module specifier.',
-            metadata: {
-                format,
-                projections: projections.map(projection => ({ plugin: projection.plugin, module: projection.module })),
-            },
+        return ProjectionConflict({
+            format,
+            projections: projections.map(projection => ({ plugin: projection.plugin, module: projection.module })),
         });
     }
-    return projections[0];
+    return first;
 }
 function getBunResolver() {
     const candidate = globalThis.Bun;
@@ -110,93 +87,98 @@ function getBunResolver() {
 function importSpecifierFor(resolved) {
     if (resolved.startsWith('file:'))
         return resolved;
-    if (isAbsolute(resolved))
+    if (path.isAbsolute(resolved))
         return pathToFileURL(resolved).href;
     return resolved;
 }
 function resolveProjectionSpecifier(specifier, appFilePath) {
-    const fromDir = dirname(appFilePath);
+    const fromDir = path.dirname(appFilePath);
     const bun = getBunResolver();
     if (bun !== undefined)
         return bun.resolveSync(specifier, fromDir);
     return createRequire(appFilePath).resolve(specifier);
 }
-async function loadProjectionModule(specifier, appFilePath, registeringPlugin) {
-    let resolved;
-    try {
-        resolved = resolveProjectionSpecifier(specifier, appFilePath);
+function messageOf(error) {
+    return error instanceof Error ? error.message : String(error);
+}
+function hasProject(value) {
+    return (is(value, recordSchema) &&
+        typeof value['project'] === 'function' &&
+        (value['render'] === undefined || typeof value['render'] === 'function') &&
+        (value['consolePage'] === undefined || typeof value['consolePage'] === 'function'));
+}
+/** Resolve the specifier relative to the app file and `import()` it: the default importer. */
+function importRelativeToApp(appFilePath) {
+    return async (specifier) => {
+        let resolved;
+        try {
+            resolved = resolveProjectionSpecifier(specifier, appFilePath);
+        }
+        catch (error) {
+            throw new ProjectionResolveError(error);
+        }
+        return import(importSpecifierFor(resolved));
+    };
+}
+/** Marks a failure of the resolve step, so the import failure names that stage. */
+class ProjectionResolveError extends Error {
+    cause;
+    constructor(cause) {
+        super(messageOf(cause), { cause });
+        this.cause = cause;
     }
-    catch (error) {
-        throw new DotCliError({
-            code: DotCliErrorCode.ProjectionImportFailed,
-            message: `Failed to resolve projection module "${specifier}".`,
-            remediation: 'Check that the projection module is installed and that package subpath exports include a default condition. Use --module <specifier> to debug with a replacement module.',
-            metadata: { specifier, appFilePath, registeringPlugin },
-            cause: error,
-        });
-    }
+}
+async function loadProjectionModule(specifier, registeringPlugin, importModule) {
     let imported;
     try {
-        imported = await import(importSpecifierFor(resolved));
+        imported = await importModule(specifier);
     }
     catch (error) {
-        throw new DotCliError({
-            code: DotCliErrorCode.ProjectionImportFailed,
-            message: `Failed to import projection module "${specifier}".`,
-            remediation: 'Fix the projection module export, or use --module <specifier> to debug with a replacement module.',
-            metadata: { specifier, resolved, registeringPlugin },
-            cause: error,
-        });
+        if (error instanceof ProjectionResolveError) {
+            return ProjectionImportFailed({ specifier, registeringPlugin, stage: 'resolve', causeMessage: error.message }, { cause: error.cause });
+        }
+        return ProjectionImportFailed({ specifier, registeringPlugin, stage: 'import', causeMessage: messageOf(error) }, { cause: error });
     }
-    if (typeof imported !== 'object' || imported === null || typeof imported.project !== 'function') {
-        throw new DotCliError({
-            code: DotCliErrorCode.ProjectionImportFailed,
-            message: `Projection module "${specifier}" does not export project(manifest).`,
-            remediation: 'Export a named `project(manifest)` function from the projection module. Use --module <specifier> to test a corrected module.',
-            metadata: { specifier, resolved, registeringPlugin },
-        });
+    if (!hasProject(imported)) {
+        return ProjectionImportFailed({ specifier, registeringPlugin, stage: 'export', causeMessage: null });
     }
-    return { module: imported, resolved };
+    return imported;
 }
-/**
- * Render an adapter-owned projection. Plain mode prints strings verbatim and
- * JSON values as pretty JSON; JSON mode wraps the document in the standard
- * CLI envelope.
- */
-export async function renderProjection(source, opts) {
+/** Run the projection registered for `source.format` and return its document. */
+export async function renderProjection(source) {
     const projection = selectProjection(source.manifest, source.format);
+    if (isFailure(projection))
+        return projection;
     const specifier = source.module ?? projection.module;
-    const { module } = await loadProjectionModule(specifier, source.appFilePath, projection.plugin);
-    let document;
+    const importModule = source.importModule ?? importRelativeToApp(source.appFilePath);
+    const loaded = await loadProjectionModule(specifier, projection.plugin, importModule);
+    if (isFailure(loaded))
+        return loaded;
     try {
-        document = toProjectionJsonValue(await module.project(source.manifest));
+        const document = toProjectionJsonValue(await loaded.project(source.manifest));
+        let page;
+        if (source.page === true) {
+            if (loaded.consolePage === undefined)
+                throw new TypeError('A projection module needs consolePage(document) to give the console a page.');
+            const html = loaded.consolePage(document);
+            if (typeof html !== 'string')
+                throw new TypeError('A projection module\'s consolePage(document) must return a string.');
+            page = html;
+        }
+        const withPage = page === undefined ? {} : { page };
+        if (loaded.render === undefined)
+            return { format: source.format, document, ...withPage };
+        const text = loaded.render(document);
+        if (typeof text !== 'string')
+            throw new TypeError('A projection module\'s render(document) must return a string.');
+        return { format: source.format, document, text, ...withPage };
     }
     catch (error) {
-        throw new DotCliError({
-            code: DotCliErrorCode.ProjectionExecutionFailed,
-            message: `Projection "${source.format}" failed while rendering.`,
-            remediation: 'Fix the projection project(manifest) function so it is pure and returns JSON-round-trip-safe output.',
-            metadata: { format: source.format, specifier, registeringPlugin: projection.plugin },
-            cause: error,
-        });
+        return ProjectionExecutionFailed({ format: source.format, specifier, registeringPlugin: projection.plugin, causeMessage: messageOf(error) }, { cause: error });
     }
-    const envelope = {
-        status: 'success',
-        command: source.command,
-        generatedAt: nowIso(opts),
-        data: { format: source.format, document },
-        errors: [],
-    };
-    const out = opts.out ?? defaultOut;
-    if (opts.json) {
-        out(`${JSON.stringify(envelope, null, 2)}\n`);
-    }
-    else if (typeof document === 'string') {
-        out(`${document}\n`);
-    }
-    else {
-        out(`${JSON.stringify(document, null, 2)}\n`);
-    }
-    return envelope;
+}
+/** True when a command's data is the `--as` payload. */
+export function isProjectionData(value) {
+    return is(value, recordSchema) && 'format' in value && 'document' in value;
 }
 //# sourceMappingURL=render-projection.js.map

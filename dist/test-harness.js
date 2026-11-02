@@ -1,64 +1,67 @@
 /**
- * Test harness for unit-testing DOT plugins.
+ * Test builders that boot units against fakes: `testUnit`, `testApp` and `bootTestApp`.
  *
- * Provides `testApp` — a convenience wrapper that lets plugin authors verify
+ * Provides `testApp` — a convenience wrapper that lets unit authors verify
  * lifecycle behaviour, registration, and service publishing without dragging
  * in concrete framework dependencies.
  *
- * NOTE: `testApp` takes an erased plugin array, so the compile-time wiring
- * guard does not apply here — the kernel's runtime validation (unsatisfied
- * needs, collisions) still does. Use `defineApp(...).use(...)` chains in
- * tests that should exercise the type-level guard.
+ * Tuples use the compile-time wiring guard. Runtime-built arrays use the
+ * kernel's validation of missing needs and collisions at boot.
  *
  * @example
- *   import { testApp, plugin } from '@arki/dot';
+ *   import { bootTestApp, infra } from '@arki/dot';
+ *   import { orThrow } from '@arki/failure';
  *
- *   const myPlugin = plugin({
+ *   const myUnit = infra({
  *     name: 'counter',
- *     boot: () => ({ counter: { value: 0 } }),
+ *     provides: { counter: () => ({ value: 0 }) },
  *   });
  *
  *   it('publishes a counter service', async () => {
- *     const app = await bootTestApp<{ counter: { value: number } }>([myPlugin]);
+ *     const app = orThrow(await bootTestApp([myUnit])); // app.services typed from the units
  *     expect(app.services.counter.value).toBe(0);
  *     await app.dispose();
  *   });
  */
-import { defineApp } from './define-app.js';
-/**
- * Build a DOT app builder pre-populated with the given plugins, ready to
- * `.configure()`, `.boot()` or `.start()` from a test.
- */
-export function testApp(plugins = [], options = {}) {
-    let builder = defineApp(options.name ?? 'test-app', { config: options.config });
-    for (const p of plugins) {
-        builder = builder.use(p);
-    }
-    return builder;
+import { mountUnits } from './define-app.js';
+import { createUnitRuntime, handleOf } from './unit-contract.js';
+function runtimeUnits(units) {
+    return units;
+}
+function runtimeUnit(unit) {
+    return unit;
 }
 /**
- * Convenience: build, boot, return the running app. Caller is responsible for
- * calling `app.dispose()` when finished.
+ * Build a DOT app builder pre-populated with the given units, ready to
+ * `.configure()`, `.boot()` or `.start()` from a test. The services are read
+ * off the units — `testApp([database]).boot()` gives `app.services.db` —
+ * and a tuple that would not mount (a need before its provider, a wire key
+ * provided twice) is a compile error on the argument.
  */
-export async function bootTestApp(plugins = [], options = {}) {
-    return testApp(plugins, options).boot();
+export function testApp(units, options = {}) {
+    return mountUnits(options.name ?? 'test-app', runtimeUnits(units ?? []), { config: options.config });
+}
+/** Build and boot an app, returning declared ownership failures to its caller. */
+export function bootTestApp(units, options = {}) {
+    return testApp(units, options).boot();
 }
 /**
- * Unit-test a single plugin with **typed overrides** — the compile-checked
+ * Unit-test a single unit with **typed overrides** — the compile-checked
  * counterpart to {@link testApp}'s erased arrays.
  *
- * Each `.provide()` satisfies one of the plugin's needs directly (no real
- * provider plugin, no dependency chain) and removes it from the builder's
+ * Each `.provide()` satisfies one of the unit's needs directly (no real
+ * provider unit, no dependency chain) and removes it from the builder's
  * remaining-needs type. `boot()` only compiles once every need is covered,
  * and a fake of the wrong shape fails at the `.provide()` call site:
  *
  * ```ts
- * import { testPlugin } from '@arki/dot/test-harness';
+ * import { testUnit } from '@arki/dot/test-harness';
+ * import { orThrow } from '@arki/failure';
  *
- * const app = await testPlugin(catalog)
+ * const app = orThrow(await testUnit(catalog)
  *   .provide(Db, fakeDb)          // token need
  *   .provide('cache', fakeKv)     // anonymous need — wire key is the alias
- *   .boot();
+ *   .boot());
  *
  * expect(app.services.catalog.list()).toEqual([]);
  * await app.dispose();
@@ -67,52 +70,70 @@ export async function bootTestApp(plugins = [], options = {}) {
  * `service.lazy<T>()` needs accept either a plain `T` fake (the kernel
  * lifts it) or a `Lazy<T>` handle (`lazyOf(value)` is handy here).
  * Lifecycle semantics are the real kernel's — the fakes are published by a
- * synthetic first plugin, so reverse-order teardown and lazy auto-dispose
+ * synthetic first unit, so reverse-order teardown and lazy auto-dispose
  * behave exactly as in production.
  */
-export function testPlugin(plugin, options = {}) {
-    // Erasure seam — same boundary as `makeBuilder` in define-app.ts: the
-    // runtime impl is untyped, the type parameters do all the guarding.
-    return makeTestPluginBuilder({ plugin: plugin, fakes: {}, options });
+export function testUnit(unit, options = {}) {
+    return makeTestUnitBuilder({
+        plugin: runtimeUnit(unit),
+        fakes: {},
+        options,
+    });
+}
+/** The factories return their original fake values; only their computed key record is remapped. */
+function fakeUnit(name, fakes) {
+    const entries = Object.entries(fakes);
+    const factories = Object.fromEntries(entries.map(([key, value]) => [key, () => value]));
+    return {
+        name,
+        needs: {},
+        actions: [],
+        renames: {},
+        provides: Object.fromEntries(entries.map(([key]) => [key, handleOf(key, name)])),
+        factories,
+        runtime: createUnitRuntime(),
+        hooks: {},
+    };
+}
+/** Generic state keeps closed operations typed while fakes accumulate by wire key. */
+function makeTestUnitBuilder(state) {
+    const appBuilder = () => {
+        const units = [];
+        if (Object.keys(state.fakes).length > 0)
+            units.push(fakeUnit(`test:fakes(${state.plugin.name})`, state.fakes));
+        units.push(state.plugin);
+        return mountUnits(state.options.name ?? `test:${state.plugin.name}`, units, { config: state.options.config });
+    };
+    function provide(tokenOrKey, value) {
+        const key = typeof tokenOrKey === 'string' ? tokenOrKey : tokenOrKey.key;
+        // Computed-key construction preserves the same key and value supplied by provide().
+        const fakes = { ...state.fakes, [key]: value };
+        return makeTestUnitBuilder({
+            ...state,
+            fakes,
+        });
+    }
+    return {
+        provide,
+        boot: () => appBuilder().boot(),
+        start: () => appBuilder().start(),
+    };
 }
 /**
- * Erased implementation behind {@link testPlugin}. Mirrors `makeBuilder` in
- * `define-app.ts`: the runtime is untyped, the single cast at the return
- * is the seam, and the type parameters do all the guarding.
+ * A unit that provides one fake under a real handle's wire key — for
+ * app-level tests that mount the real features against fakes:
+ *
+ * ```ts
+ * defineApp('test').infra(fake(database.provides.db, db)).features([...features])
+ * ```
+ *
+ * The fake is type-checked against the handle: a wrong-shaped value fails
+ * at the call site. The unit is named `fake:<key>`.
  */
-function makeTestPluginBuilder(state) {
-    const bootApp = async () => {
-        const plugins = [];
-        if (Object.keys(state.fakes).length > 0) {
-            const fakes = { ...state.fakes };
-            plugins.push({
-                name: `test:fakes(${state.plugin.name})`,
-                needs: {},
-                actions: [],
-                renames: {},
-                hooks: { boot: () => fakes },
-            });
-        }
-        plugins.push(state.plugin);
-        return testApp(plugins, {
-            name: state.options.name ?? `test:${state.plugin.name}`,
-            ...(state.options.config === undefined ? {} : { config: state.options.config }),
-        }).boot();
-    };
-    const impl = {
-        provide(tokenOrKey, value) {
-            const key = typeof tokenOrKey === 'string' ? tokenOrKey : tokenOrKey.key;
-            return makeTestPluginBuilder({ ...state, fakes: { ...state.fakes, [key]: value } });
-        },
-        async boot(..._guard) {
-            return bootApp();
-        },
-        async start(..._guard) {
-            const app = await bootApp();
-            await app.start();
-            return app;
-        },
-    };
-    return impl;
+export function fake(handle, value) {
+    // Erasure seam: the factory record is built under `handle.key` at
+    // runtime; its type is exactly `{ [handle.key]: Value }`.
+    const fakes = { [handle.key]: value };
+    return fakeUnit(`fake:${handle.key}`, fakes);
 }
 //# sourceMappingURL=test-harness.js.map

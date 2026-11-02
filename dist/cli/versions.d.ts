@@ -19,12 +19,12 @@ export declare function readDotVersion(): string;
  * placeholder is `{{<camelCaseKey>Version}}` (see `new.ts`).
  */
 export declare const TEMPLATE_VERSIONS: {
-    readonly env: '0.0.9';
-    readonly log: '0.1.0';
-    readonly db: '0.2.0';
-    readonly journal: '0.1.1';
-    readonly ui: '0.1.5';
-    readonly 'design-systems': '0.1.2';
+    readonly env: '0.2.0';
+    readonly log: '0.4.0';
+    readonly db: '0.5.0';
+    readonly journal: '0.4.0';
+    readonly failure: '0.3.0';
+    readonly ui: '0.2.0';
 };
 /** Third-party versions the templates inline through a placeholder. */
 export declare const ZOD_VERSION = "4.6.5";

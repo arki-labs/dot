@@ -1,0 +1,659 @@
+[
+  {
+    "code": "ARKI_DOT_E001",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "A `configure` hook attempted async work (returned a Promise).",
+    "fix": "Make `configure` synchronous and move async work to `boot`.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/lifecycle.ts:62"
+  },
+  {
+    "code": "ARKI_DOT_E002",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "A `configure` hook threw.",
+    "fix": "Fix the unit's config or its `configure` hook, then build a new app.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/lifecycle.ts:68"
+  },
+  {
+    "code": "ARKI_DOT_E003",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "A `boot` hook threw.",
+    "fix": "Read `cause` and `plugin`, then fix that unit's `boot` hook or the service it opens.",
+    "verify": "dot doctor --json | jq -e .ok",
+    "source": "src/lifecycle.ts:74"
+  },
+  {
+    "code": "ARKI_DOT_E004",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "A `start` hook threw.",
+    "fix": "Read `cause` and `plugin`, then fix that unit's `start` hook.",
+    "verify": "bun run test",
+    "source": "src/lifecycle.ts:80"
+  },
+  {
+    "code": "ARKI_DOT_E005",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "One or more `stop` hooks threw — aggregate.",
+    "fix": "Read `failures`: each entry names the unit whose `stop` hook threw.",
+    "verify": "bun run test",
+    "source": "src/lifecycle.ts:86"
+  },
+  {
+    "code": "ARKI_DOT_E006",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "One or more `dispose` hooks threw — aggregate.",
+    "fix": "Read `failures`: each entry names the unit whose `dispose` hook threw.",
+    "verify": "dot doctor --json | jq -e .ok",
+    "source": "src/lifecycle.ts:92"
+  },
+  {
+    "code": "ARKI_DOT_E007",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "Caller tried to reuse the app after dispose.",
+    "fix": "Build a fresh app instance; a disposed app cannot run again.",
+    "verify": "bun run test",
+    "source": "src/lifecycle.ts:98"
+  },
+  {
+    "code": "ARKI_DOT_E008",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "Caller tried to reuse the app after a failed lifecycle.",
+    "fix": "Build a fresh app instance; a failed app cannot run again.",
+    "verify": "bun run test",
+    "source": "src/lifecycle.ts:104"
+  },
+  {
+    "code": "ARKI_DOT_E011",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "Unit registered twice.",
+    "fix": "Remove the second `.infra()` of this unit, or `rename` it to run two copies.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/lifecycle.ts:114"
+  },
+  {
+    "code": "ARKI_DOT_E012",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "A unit's `needs` entry has no provider among earlier-booted units.",
+    "fix": "Mount a unit that provides the needed key before its consumer.",
+    "verify": "dot doctor --json | jq -e .ok",
+    "source": "src/lifecycle.ts:120"
+  },
+  {
+    "code": "ARKI_DOT_E013",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "A unit published a wire key that an earlier unit already provides.",
+    "fix": "Give one of the two providers a different key with `rename`.",
+    "verify": "dot doctor --json | jq -e .ok",
+    "source": "src/lifecycle.ts:126"
+  },
+  {
+    "code": "ARKI_DOT_E014",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "A needs alias, publish key, or rename target uses the reserved `$` prefix.",
+    "fix": "Rename the key; names starting with `$` belong to the kernel.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/lifecycle.ts:132"
+  },
+  {
+    "code": "ARKI_DOT_E015",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "A lifecycle hook exceeded the app's `hookTimeoutMs` watchdog.",
+    "fix": "Pass the hook's `$signal` to its I/O, or raise `hookTimeoutMs` with a reason.",
+    "verify": "dot doctor --json | jq -e .ok",
+    "source": "src/lifecycle.ts:138"
+  },
+  {
+    "code": "ARKI_DOT_E016",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "Two actions in the same binding use the same id.",
+    "fix": "Give each action in a binding its own id.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/lifecycle.ts:144"
+  },
+  {
+    "code": "ARKI_DOT_E017",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "Action metadata is not JSON-round-trip safe.",
+    "fix": "Keep action `meta` plain JSON: no functions, Dates, Maps or cycles.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/lifecycle.ts:150"
+  },
+  {
+    "code": "ARKI_DOT_E018",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "More than one unit fills the logging slot.",
+    "fix": "Keep one `log()` unit in the app.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/lifecycle.ts:156"
+  },
+  {
+    "code": "ARKI_DOT_E019",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "Static capability needs form a ring: a feature's need comes back around to itself.",
+    "fix": "Move the shared piece into a third unit that both sides need.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/lifecycle.ts:162"
+  },
+  {
+    "code": "ARKI_DOT_E020",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "A feature needs a capability whose (static) provider is mounted after it.",
+    "fix": "Mount the provider before the unit that needs it; the message names both positions.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/lifecycle.ts:168"
+  },
+  {
+    "code": "ARKI_DOT_E021",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "`$describeAction` named an action the calling unit may not amend (unknown id, or not its own).",
+    "fix": "Describe only actions the calling unit declared or owns.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/lifecycle.ts:174"
+  },
+  {
+    "code": "ARKI_DOT_E022",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "Two routers of a feature use the same key.",
+    "fix": "Rename one of the two router keys.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/feature-error.ts:14"
+  },
+  {
+    "code": "ARKI_DOT_E023",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "Two repos of a feature use the same key.",
+    "fix": "Rename one of the two repo keys.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/feature-error.ts:20"
+  },
+  {
+    "code": "ARKI_DOT_E024",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "Two slices of a feature use the same key.",
+    "fix": "Rename one of the two slice keys.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/feature-error.ts:26"
+  },
+  {
+    "code": "ARKI_DOT_E025",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "A feature was declared with no slices.",
+    "fix": "Add at least one slice to the feature.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/feature-error.ts:32"
+  },
+  {
+    "code": "ARKI_DOT_E026",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "A handle the feature needs is missing from the services bag.",
+    "fix": "Mount the provider of that handle, and check the gateway's needs.",
+    "verify": "dot doctor --json | jq -e .ok",
+    "source": "src/feature-error.ts:38"
+  },
+  {
+    "code": "ARKI_DOT_E027",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "A need alias, infra key, provided key or entrypoint key collides with another slot or a reserved name.",
+    "fix": "Rename the alias or key so it collides with nothing.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/feature-error.ts:44"
+  },
+  {
+    "code": "ARKI_DOT_E028",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "`override()` named a key that no infra unit of the feature provides.",
+    "fix": "Override a key that one of the feature's infra units provides.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/feature-error.ts:50"
+  },
+  {
+    "code": "ARKI_DOT_E029",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "`routerFor()`: an app-contract key is implemented by zero or several features.",
+    "fix": "Give each app-contract key exactly one feature.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/feature-error.ts:56"
+  },
+  {
+    "code": "ARKI_DOT_E030",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "`routerFor()`: a feature's contract is not mounted in the app contract.",
+    "fix": "Mount the feature's contract in the app contract.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/feature-error.ts:62"
+  },
+  {
+    "code": "ARKI_DOT_E031",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "`rpc()`: a procedure's contract `meta` is not plain JSON, so `dot explain` cannot show it.",
+    "fix": "Keep the procedure's contract `meta` plain JSON.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/feature-error.ts:68"
+  },
+  {
+    "code": "ARKI_DOT_E033",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "A unit was mounted on the wrong side of the hexagon: an `entrypoint` in `.infra()` / `.infra()`, or an `infra` or `feature` unit in `.entrypoints()` / `.entrypoints()`. Typed graphs refuse this at compile time; this catches erased ones.",
+    "fix": "Mount infra with `.infra(...)` and entrypoints with `.entrypoints(...)`, or build the unit with the other constructor.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/lifecycle.ts:182"
+  },
+  {
+    "code": "ARKI_DOT_E034",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "A feature needs `domainService(fn)` that no parent declares above `.features()`: the parent never passed `fn` to `.domainServices()`, or the feature is top-level.",
+    "fix": "Pass the factory to the parent's `.domainServices({ … })` before `.features()`, and need it only from that parent's children.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/feature-error.ts:74"
+  },
+  {
+    "code": "ARKI_DOT_E035",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "`.domainServices()` ran twice, or after `.features()`, `.usecases()` or `.provides()`.",
+    "fix": "Declare every domain service in one `.domainServices({ … })` call, right after `.infra()`.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/feature-error.ts:80"
+  },
+  {
+    "code": "ARKI_ENV_UNIT_E001",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "The env failed its schema at boot. The message lists every bad key.",
+    "fix": "Set the listed variables, or fix their values, before booting the app.",
+    "verify": "dot doctor --json | jq '.data'",
+    "source": "src/env.ts:50"
+  },
+  {
+    "code": "DOT_LOG_E001",
+    "package": "@arki/dot",
+    "kind": "thrown",
+    "what": "`boot` ran before the kernel activated the logging slot.",
+    "fix": "Mount `log()` with `.infra()` in a Dot app and let the kernel run its hooks; never call them yourself.",
+    "verify": "dot doctor --json | jq -e .ok",
+    "source": "src/log.ts:33"
+  },
+  {
+    "code": "dot.action_approval_required",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "Approval must be verified for this invocation, not inferred from another exposure.",
+    "fix": "Verify approval bound to the caller, action and input.",
+    "verify": "bun run test -- src/tests/action.test.ts",
+    "source": "src/action.ts:31"
+  },
+  {
+    "code": "dot.action_not_exposed",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "An adapter may call only an explicitly exposed boundary.",
+    "fix": "Use an adapter listed by the action contract.",
+    "verify": "bun run test -- src/tests/action.test.ts",
+    "source": "src/action.ts:13"
+  },
+  {
+    "code": "dot.action_principal_required",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "The adapter must authenticate its caller before invoking this action.",
+    "fix": "Authenticate the caller before invoking the action.",
+    "verify": "bun run test -- src/tests/action.test.ts",
+    "source": "src/action.ts:22"
+  },
+  {
+    "code": "dot.app_import_failed",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "Importing the app file threw, or its exported factory did.",
+    "fix": "Apply `.error.data.causeRemediation` when it is set; otherwise run `bun <app file>` to reproduce.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/cli/failures.ts:126"
+  },
+  {
+    "code": "dot.app_invalid_export",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "The app file loaded, but no export is a DOT app, or several are and none is `default` or `app`.",
+    "fix": "Export the app as `default` or as `app`.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/cli/failures.ts:89"
+  },
+  {
+    "code": "dot.app_lifecycle_failed",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "`configure` threw while the CLI prepared the app.",
+    "fix": "Read `.error.data.underlyingCode` and look it up in the kernel error table; `ARKI_DOT_E020` means a provider is mounted after its consumer.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/cli/failures.ts:151"
+  },
+  {
+    "code": "dot.app_not_found",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "No app file at the default paths and no `--app`.",
+    "fix": "Create `dot.config.ts` that exports the app, or pass `--app <path>`.",
+    "verify": "dot explain --json | jq -e .ok",
+    "source": "src/cli/failures.ts:65"
+  },
+  {
+    "code": "dot.dev_already_running",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "Another `dot dev` is alive in this project: its pid is in the state file.",
+    "fix": "Stop the other `dot dev`; if its pid is not a `dot dev`, delete the file in `.error.data.statePath`.",
+    "verify": "dot dev --once --json | jq -e .ok",
+    "source": "src/cli/failures.ts:421"
+  },
+  {
+    "code": "dot.dev_app_started",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "The app export is already configured, booted or started: `dot dev` cannot own its lifecycle.",
+    "fix": "Export the unstarted builder: no `configure()`, `boot()` or `start()` call on the `dev` export.",
+    "verify": "dot dev --once --json | jq -e .ok",
+    "source": "src/cli/failures.ts:462"
+  },
+  {
+    "code": "dot.dev_db_unreachable",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "`dot dev` found no Postgres to talk to: no URL, a bad URL, or a closed port it could not start.",
+    "fix": "Start the database, fix `DB_URL` in `.env`, or run `dot dev --db pglite`.",
+    "verify": "dot dev --once --json | jq -e .ok",
+    "source": "src/cli/failures.ts:371"
+  },
+  {
+    "code": "dot.dev_port_in_use",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "Something already listens on the app port, so the runner would not get it.",
+    "fix": "Stop the process on that port, or pick another one with `dot dev --port <n>`.",
+    "verify": "dot dev --once --json | jq -e .ok",
+    "source": "src/cli/failures.ts:405"
+  },
+  {
+    "code": "dot.dev_preflight_failed",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "The preflight process did not report a result: a crash, a hang past the timeout, or output that is not its report. Never a pass.",
+    "fix": "Read `.error.data.output`, then run `dot doctor --app <file>` to see the same boot in the foreground.",
+    "verify": "dot dev --once --json | jq -e .ok",
+    "source": "src/cli/failures.ts:487"
+  },
+  {
+    "code": "dot.dev_remote_db_refused",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "The database is neither on this machine nor a compose service: `dot dev` would migrate it on boot.",
+    "fix": "Point every database URL at this machine or a compose service, or pass `--allow-remote-db` on purpose.",
+    "verify": "dot dev --once --json | jq -e .ok",
+    "source": "src/cli/failures.ts:445"
+  },
+  {
+    "code": "dot.dev_runner_failed",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "The app runner (`vite dev`, `--run`, or `dot _serve`) could not be started.",
+    "fix": "Install the runner, or pass the command that serves the app with `dot dev --run \"<cmd>\"`.",
+    "verify": "dot dev --once --json | jq -e .ok",
+    "source": "src/cli/failures.ts:388"
+  },
+  {
+    "code": "dot.doctor_failed",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "`doctor` found error-severity issues. The data is the whole report: `.error.data.plugins[]`.",
+    "fix": "Apply the `remediation` of each issue in `.error.data.plugins[].issues` and `.error.data.issues`.",
+    "verify": "dot doctor --json | jq -e .ok",
+    "source": "src/cli/failures.ts:273"
+  },
+  {
+    "code": "dot.env_check_failed",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "`dot env check` found at least one error.",
+    "fix": "Work through `.error.data.findings`; each has its own `remediation`.",
+    "verify": "dot env check --json | jq -e .ok",
+    "source": "src/cli/env-failures.ts:26"
+  },
+  {
+    "code": "dot.env_command_failed",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "The command after `--` could not be started.",
+    "fix": "Check the command name and PATH.",
+    "verify": "dot env run -- node --version",
+    "source": "src/cli/env-failures.ts:125"
+  },
+  {
+    "code": "dot.env_decrypt_tracked",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "Decrypting a tracked file would put plaintext secrets one `git add` away from a commit.",
+    "fix": "Pass `--force` if you really mean it, and do not commit the result.",
+    "verify": "git diff --stat",
+    "source": "src/cli/env-failures.ts:103"
+  },
+  {
+    "code": "dot.env_key_not_found",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "The key is in none of the loaded env files.",
+    "fix": "Check the name and `--env`; `dot env ls` lists the keys.",
+    "verify": "dot env ls --json",
+    "source": "src/cli/env-failures.ts:81"
+  },
+  {
+    "code": "dot.env_load_failed",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "The env files could not be loaded: a private key is missing, a value cannot be decrypted, or a reference cannot be resolved.",
+    "fix": "Follow the message of each entry in `.error.data.errors` (codes `ARKI_ENV_FILES_E00x`).",
+    "verify": "dot env check --json | jq -e .ok",
+    "source": "src/cli/env-failures.ts:37"
+  },
+  {
+    "code": "dot.env_no_change",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "The command would write nothing: the value is already there, or there was nothing to encrypt or decrypt.",
+    "fix": "Read `.error.data.reason`; a variable exported in the shell does not change the file.",
+    "verify": "dot env ls --json",
+    "source": "src/cli/env-failures.ts:48"
+  },
+  {
+    "code": "dot.env_no_header",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "The file has no dotenvx public key header, so values cannot be encrypted into it.",
+    "fix": "Run `dot env init` with the same `--env`/`--file`.",
+    "verify": "dot env ls --json",
+    "source": "src/cli/env-failures.ts:59"
+  },
+  {
+    "code": "dot.env_plain_secret",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "`--plain` was asked for a key the env schema declares with `secret()`.",
+    "fix": "Drop `--plain`: a secret must be encrypted in a tracked file.",
+    "verify": "dot env check --json | jq -e .ok",
+    "source": "src/cli/env-failures.ts:70"
+  },
+  {
+    "code": "dot.env_reveal_refused",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "A value was asked for where it would leave the terminal (a pipe, a file, an agent's transcript).",
+    "fix": "Run `dot env get <KEY> --reveal` in an interactive terminal, or `dot env run -- <cmd>` to hand values to a process.",
+    "verify": "dot env get <KEY> --json",
+    "source": "src/cli/env-failures.ts:92"
+  },
+  {
+    "code": "dot.env_value_missing",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "The value came from both a positional argument and `--stdin`, or from neither.",
+    "fix": "Give exactly one: `dot env set KEY value`, or `printf %s \"$VALUE\" | dot env set KEY --stdin`.",
+    "verify": "dot env ls --json",
+    "source": "src/cli/env-failures.ts:114"
+  },
+  {
+    "code": "dot.env_vault_failed",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "The 1Password CLI (`op`) failed or is not signed in.",
+    "fix": "Install `op`, sign in (`op signin`), and check the vault name.",
+    "verify": "op vault list",
+    "source": "src/cli/env-failures.ts:136"
+  },
+  {
+    "code": "dot.env_vault_write_unconfirmed",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "A vault write was attempted but its result was not confirmed.",
+    "fix": "Read the item from 1Password before retrying; the write may already have completed.",
+    "verify": "dot env keys push --vault <vault> --json",
+    "source": "src/cli/env-failures.ts:147"
+  },
+  {
+    "code": "dot.lazy_closed",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "An operation tried to initialize a service after its owner closed admission.",
+    "fix": "Use the handle only while its owning application is running.",
+    "verify": "bun run test -- src/tests/lazy-handle.test.ts",
+    "source": "src/lazy.ts:10"
+  },
+  {
+    "code": "dot.observability_no_sdk",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "`doctor --observability` found no OpenTelemetry SDK. Reported as a warning issue in the snapshot, not returned.",
+    "fix": "Register an OpenTelemetry SDK once at app entry, before any app boots.",
+    "verify": "dot doctor --observability --json | jq '.data.issues'",
+    "source": "src/cli/failures.ts:169"
+  },
+  {
+    "code": "dot.preflight_failed",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "A managed preflight reported a lifecycle failure, retaining the complete report.",
+    "fix": "Read `.error.data.failure.code` and apply its message; inspect `.error.data.report` for diagnostics.",
+    "verify": "dot _preflight --json | jq '.error.data.failure.code'",
+    "source": "src/cli/failures.ts:514"
+  },
+  {
+    "code": "dot.projection_conflict",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "Two units register different modules for one projection format.",
+    "fix": "Remove one registration, or make both units register the same module.",
+    "verify": "dot explain --as <format> --json | jq -e .ok",
+    "source": "src/cli/failures.ts:255"
+  },
+  {
+    "code": "dot.projection_execution_failed",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "`project(manifest)` threw or returned output that does not survive a JSON round trip.",
+    "fix": "Make `project(manifest)` pure and return JSON-round-trip-safe output.",
+    "verify": "dot explain --as <format> --json | jq -e .ok",
+    "source": "src/cli/failures.ts:235"
+  },
+  {
+    "code": "dot.projection_import_failed",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "The projection module could not be resolved or imported, or exports no `project(manifest)`.",
+    "fix": "Install the module and export a named `project(manifest)` function from it.",
+    "verify": "dot explain --as <format> --json | jq -e .ok",
+    "source": "src/cli/failures.ts:206"
+  },
+  {
+    "code": "dot.projection_not_found",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "No unit registers the `--as` format.",
+    "fix": "Use a format from `.error.data.registeredFormats`, or mount the adapter that provides it.",
+    "verify": "dot explain --as <format> --json | jq -e .ok",
+    "source": "src/cli/failures.ts:182"
+  },
+  {
+    "code": "dot.runtime_release_failed",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "Previous ownership could not be released, so starting another app is unsafe.",
+    "fix": "Resolve the disposal failure before starting another owner of the resources.",
+    "verify": "bun run test -- src/tests/app-runtime.test.ts",
+    "source": "src/runtime.ts:38"
+  },
+  {
+    "code": "dot.runtime_replaced",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "A replaced module no longer owns the application's runtime.",
+    "fix": "Obtain the runtime exported by the current module.",
+    "verify": "bun run test -- src/tests/app-runtime.test.ts",
+    "source": "src/runtime.ts:27"
+  },
+  {
+    "code": "dot.target_not_empty",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "`dot new` would overwrite files in a non-empty target directory.",
+    "fix": "Choose an empty directory, or re-run with `--force` to overwrite.",
+    "verify": "dot new <name> --dry-run --json | jq -e .ok",
+    "source": "src/cli/failures.ts:294"
+  },
+  {
+    "code": "dot.template_missing",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "The package's bundled template directory is empty or missing.",
+    "fix": "Reinstall `@arki/dot`: it must ship its `templates/` directory.",
+    "verify": "dot new <name> --dry-run --json | jq -e .ok",
+    "source": "src/cli/failures.ts:311"
+  },
+  {
+    "code": "dot.write_failed",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "`dot new` could not write some files. `written` lists the ones that landed.",
+    "fix": "Check the permissions of the target directory, then re-run with `--force`.",
+    "verify": "dot new <name> --dry-run --json | jq -e .ok",
+    "source": "src/cli/failures.ts:332"
+  }
+]

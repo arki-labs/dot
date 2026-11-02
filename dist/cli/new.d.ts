@@ -12,23 +12,24 @@
  * entries describing every file the scaffold WOULD write (template
  * substitution included), then either:
  *
- *   - `--dry-run` -> print the JSON envelope, write nothing.
+ *   - `--dry-run` -> return the plan, write nothing.
  *   - real run    -> commit the planned operations to disk.
  *
- * The dry-run envelope is the contract: agents read it to know exactly
- * which files will land, with sha256 hashes so they can verify the
- * post-run filesystem matches the plan.
+ * The dry-run result is the contract: agents read `.data.operations[]` to
+ * know exactly which files will land, with sha256 hashes so they can verify
+ * the post-run filesystem matches the plan.
  *
  * Templates live at `packages/dot/templates/app-<name>/` and use
  * `.tmpl` suffixes + `{{name}}`-style placeholders. The suffix is
  * stripped during scaffolding so `package.json.tmpl` becomes
  * `package.json` on disk.
  *
- * Commands deferred to v1.1 (`dot add <plugin>`, `dot dev`,
- * `dot migrate`) are deliberately NOT surfaced here.
+ * Commands deferred to v1.1 (`dot add <unit>`, `dot migrate`) are
+ * deliberately NOT surfaced here.
  */
+import type { Failure } from '@arki/failure';
 import type { FileOperation } from './files.js';
-import type { DotNewEnvelope } from './json.js';
+import type { DotNewResult } from './json.js';
 /**
  * Package manager the generated README + AGENTS.md will reference.
  * `bun` is the default because the kernel + adapter packages are tested
@@ -41,6 +42,11 @@ export declare const TEMPLATE_NAMES: readonly ['stack', 'minimal'];
 export type TemplateName = (typeof TEMPLATE_NAMES)[number];
 /** The template `dot new` uses when `--template` is omitted. */
 export declare const DEFAULT_TEMPLATE: TemplateName;
+/** What {@link planOperations} returns: every file the scaffold would write, and where. */
+export type NewPlan = {
+    readonly operations: FileOperation[];
+    readonly target: string;
+};
 /** Options accepted by {@link runNew}. */
 export type RunNewOptions = {
     /** Application name (becomes `package.json#name`). */
@@ -59,21 +65,13 @@ export type RunNewOptions = {
     readonly pm?: PackageManager;
     /**
      * Bundled template to scaffold (`stack` or `minimal`). Defaults to
-     * {@link DEFAULT_TEMPLATE}. Any other value fails with `DOT_CLI_E005`.
+     * {@link DEFAULT_TEMPLATE}. Any other value fails with `cli.invalid_input`.
      */
     readonly template?: string;
     /** When true, only plan operations — write nothing. */
     readonly dryRun?: boolean;
-    /** When true, emit JSON to `out`. Otherwise emit progress lines. */
-    readonly json?: boolean;
     /** When true, overwrite existing files in the target dir. */
     readonly force?: boolean;
-    /** Stdout sink. Defaults to `process.stdout.write`. */
-    readonly out?: (line: string) => void;
-    /** Stderr sink. Defaults to `process.stderr.write`. */
-    readonly err?: (line: string) => void;
-    /** Override clock for deterministic envelopes. */
-    readonly now?: () => Date;
     /**
      * Override template root. Used by tests; production callers should
      * leave this undefined so the bundled `templates/app-<template>/`
@@ -92,15 +90,16 @@ export type RunNewOptions = {
         readonly log?: string;
         readonly db?: string;
         readonly journal?: string;
+        readonly failure?: string;
         readonly ui?: string;
-        readonly designSystems?: string;
     };
 };
+export declare const DEFAULT_PM: PackageManager;
 /**
- * Validate a `--template` value. Omitted means {@link DEFAULT_TEMPLATE}.
- * Exported so tests can assert the error without running a scaffold.
+ * The template a `--template` value names: omitted means
+ * {@link DEFAULT_TEMPLATE}; an unknown name is `undefined`.
  */
-export declare function resolveTemplateName(value: string | undefined): TemplateName;
+export declare function resolveTemplateName(value: string | undefined): TemplateName | undefined;
 /**
  * Resolve the absolute target path for a given app + options bundle.
  * Exported so tests can assert resolution behaviour without running the
@@ -112,23 +111,21 @@ export declare function resolveTargetDir(opts: {
     target?: string;
 }): string;
 /**
- * Validate an app name. Rules match `package.json#name` constraints
- * (lower-case, leading alphanumeric, no spaces) with one extra: we
- * disallow scoped names so the scaffold produces a single-segment dir.
+ * What is wrong with an app name, or `undefined` when it is valid. Rules
+ * match `package.json#name` constraints (lower-case, leading alphanumeric,
+ * no spaces) with one extra: scoped names are refused so the scaffold
+ * produces a single-segment dir. The `name` schema of `dot new` calls it.
  */
-export declare function validateAppName(name: string): void;
+export declare function validateAppName(name: string): string | undefined;
 /**
  * Plan the file operations for a scaffold run. Pure — does not touch
  * disk other than reading templates and `stat`-ing target paths.
  */
-export declare function planOperations(opts: RunNewOptions): Promise<{
-    operations: FileOperation[];
-    target: string;
-}>;
+export declare function planOperations(opts: RunNewOptions): Promise<NewPlan | Failure>;
 /**
- * Run the `new` command. Returns the envelope so callers (CLI + tests)
- * can act on it. Side effects: writes files when not in dry-run mode,
- * emits progress to `out`/`err`.
+ * Run `dot new`: plan, then write unless `dryRun`. Returns `{ app, operations }`
+ * or a failure: `cli.invalid_input` (name, template), `dot.target_not_empty`,
+ * `dot.template_missing`, `dot.write_failed`. Prints nothing.
  */
-export declare function runNew(opts: RunNewOptions): Promise<DotNewEnvelope>;
+export declare function runNew(opts: RunNewOptions): Promise<DotNewResult | Failure>;
 //# sourceMappingURL=new.d.ts.map

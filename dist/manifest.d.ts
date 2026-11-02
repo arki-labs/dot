@@ -2,7 +2,7 @@
  * Manifest types for the DOT kernel.
  *
  * A `DotAppManifest` is the static, declarative description of an app: which
- * plugins are registered, what actions/services/projections they contribute, and how they
+ * units are registered, what actions/services/projections they contribute, and how they
  * depend on each other. It is built up during the `configure` phase from
  * registration calls and finalised once `configure` completes.
  *
@@ -11,34 +11,42 @@
  * `projections`). Consumers MUST NOT see an omitted array — empty is empty,
  * but never missing.
  */
-import type { DotPluginRole } from './plugin-contract.js';
 import type { DotLifecycleHook } from './lifecycle.js';
+import type { UnitRole } from './unit-contract.js';
 /** JSON-serializable value — the manifest's currency. */
 export type JsonValue = string | number | boolean | null | JsonValue[] | {
     [key: string]: JsonValue;
 };
 /** JSON-serializable object used for adapter-owned manifest metadata. */
-export type JsonObject = {
-    [key: string]: JsonValue;
-};
+export type JsonObject = Record<string, JsonValue>;
+/** Code of {@link DotManifestError}. */
+export declare const DOT_MANIFEST_ERROR_CODE = "ARKI_DOT_E032";
+/** Manifest metadata that is not plain JSON. A `TypeError`, so existing `instanceof TypeError` checks still match. */
+export declare class DotManifestError extends TypeError {
+    readonly code = "ARKI_DOT_E032";
+    readonly remediation = "Pass plain JSON only: no functions, Dates, Maps, class instances, undefined fields, NaN or cycles.";
+    readonly docsUrl: string;
+    constructor(message: string, options?: {
+        readonly cause?: unknown;
+    });
+}
 /**
  * Validate and narrow unknown adapter data into manifest JSON metadata.
  *
- * The check intentionally compares the original value against a
- * JSON.stringify/parse round trip. Dates, functions, undefined fields, NaN,
+ * A schema checks the value itself, so dates, functions, undefined fields, NaN,
  * Infinity, class instances, and cycles fail instead of being silently
  * coerced in `dot explain --json`.
  */
 export declare function toJsonObject(value: unknown): JsonObject;
 /**
- * Kind of service that a plugin can publish.
+ * Kind of service that a unit can publish.
  *
  * Well-known kinds map 1:1 to the canonical `@arki/*` adapters. `custom`
- * is the escape hatch for plugin-defined service kinds — use it whenever a
- * plugin publishes something that does not fit a reserved shape.
+ * is the escape hatch for unit-defined service kinds — use it whenever a
+ * unit publishes something that does not fit a reserved shape.
  */
 export type ServiceKind = 'env' | 'db' | 'kv' | 'queue' | 'auth' | 'email' | 'logger' | 'event-store' | 'message-bus' | 'custom';
-/** Kind of dependency edge between two plugins. */
+/** Kind of dependency edge between two units. */
 export type DependencyEdgeKind = 'requires' | 'provides' | 'uses';
 /** Direction of a boundary interaction, viewed from the app. */
 export type ActionDirection = 'in' | 'out';
@@ -68,8 +76,20 @@ export type ProjectionManifest = {
     binding: string;
     /** Import specifier for the projection module. */
     module: string;
-    /** Plugin that registered this projection. */
+    /** Unit that registered this projection. */
     plugin: string;
+    /**
+     * Adapter-owned, JSON-serializable data the projection module reads, for what no action carries
+     * (the journal's folds and inline projections run inside a write, not at an app boundary). Opaque to the kernel.
+     */
+    meta?: Readonly<JsonObject>;
+    /**
+     * Gives the `dot dev` console a page for this projection. `title` is the page's name in the console's
+     * menu. The projection module must export `consolePage(document)`: it returns the page's HTML.
+     */
+    console?: {
+        readonly title: string;
+    };
 };
 /**
  * Top-level manifest describing the static shape of a DOT app.
@@ -83,37 +103,41 @@ export type DotAppManifest = {
         name: string;
         version?: string;
     };
-    plugins: PluginManifest[];
+    plugins: UnitManifest[];
     actions: ActionManifest[];
     services: ServiceManifest[];
     lifecycle: LifecycleManifest[];
     dependencies: DependencyEdge[];
     projections: ProjectionManifest[];
 };
-/** Single plugin's declarative metadata. */
-export type PluginManifest = {
+/** Single unit's declarative metadata. */
+export type UnitManifest = {
     name: string;
-    version?: string;
-    /** Hexagon role from the app builder — see `Plugin.role`. */
-    role?: DotPluginRole;
+    /** Hexagon role from the app builder — see `Unit.role`. */
+    role?: UnitRole;
     dependencies: readonly string[];
     provides: readonly string[];
 };
-/** Single service published by a plugin. */
+/** Single service published by a unit. */
 export type ServiceManifest = {
     name: string;
     plugin: string;
     kind: ServiceKind;
 };
-/** Which lifecycle hooks a plugin participates in. */
+/** Which lifecycle hooks a unit participates in. */
 export type LifecycleManifest = {
     plugin: string;
     hooks: readonly DotLifecycleHook[];
 };
-/** Directed edge in the plugin dependency graph. */
+/** Directed edge in the unit dependency graph. */
 export type DependencyEdge = {
     from: string;
     to: string;
     kind: DependencyEdgeKind;
+    /**
+     * The capability (wire key) the edge carries. Set on edges the kernel
+     * derives before boot from a feature's static `provides`.
+     */
+    key?: string;
 };
 //# sourceMappingURL=manifest.d.ts.map

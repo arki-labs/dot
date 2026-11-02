@@ -1,95 +1,23 @@
 #!/usr/bin/env node
-import type { DiscoveredApp } from './discover.js';
-import type { DotCliEnvelope } from './render-explain.js';
-import { dotCliDocsUrl, DotCliError, DotCliErrorCode } from './error-codes.js';
-export type CliCommand = 'explain' | 'doctor' | 'new' | 'help' | 'version';
-export type CliArgs = {
-    command: CliCommand;
-    json: boolean;
-    appPath?: string;
-    cwd?: string;
-    /** Positional after the command (used by `new` for the app name). */
-    positional?: string;
-    /** `--target` (only honored by `new`). */
-    target?: string;
-    /** `--template` (only honored by `new`). Validated by `runNew`. */
-    template?: string;
-    /** `--pm` (only honored by `new`). */
-    pm?: 'npm' | 'pnpm' | 'bun';
-    /** `--dry-run` (only honored by `new`). */
-    dryRun?: boolean;
-    /** `--force` (only honored by `new`). */
-    force?: boolean;
-    /** `--observability` (only honored by `doctor`). */
-    observability?: boolean;
-    /** `--graph` (honored by `explain` and `doctor`). */
-    graph?: boolean;
-    /** `--as` projection format (honored by `explain` only). */
-    as?: string;
-    /** `--module` projection override (honored by `explain --as` only). */
-    module?: string;
-    /** Deprecated `--openapi` alias for `--as openapi`. */
-    openapi?: boolean;
-};
-/**
- * Parse argv into a typed shape. Exported so tests can exercise it without
- * spawning the binary.
- */
-export declare function parseArgs(argv: readonly string[]): CliArgs;
-/**
- * Run `explain` on a discovered app.
- * Pure dependency on a `DiscoveredApp` so tests can pass synthetic values.
- */
-export declare function runExplain(discovered: DiscoveredApp, opts: {
-    json: boolean;
-    graph?: boolean;
-    as?: string;
-    module?: string;
-    appFilePath?: string;
-    openapi?: boolean;
-    out?: (line: string) => void;
-    now?: () => Date;
-}): Promise<DotCliEnvelope<unknown>>;
-type DoctorRunOptions = {
-    json: boolean;
-    out?: (line: string) => void;
-    now?: () => Date;
-    /**
-     * When `true`, probes for a registered OpenTelemetry SDK and injects
-     * a warning-severity issue into the diagnostics envelope when none is
-     * present. Default `false`.
-     */
-    observability?: boolean;
-    /** When `true`, emit the plugin graph (Mermaid) instead of diagnostics. */
-    graph?: boolean;
-};
-/**
- * Run `doctor` on a discovered app. The CLI owns boot+dispose only when it
- * receives a builder. If the caller passed an already-booted app, we leave
- * lifecycle to them.
- *
- * If `boot()` throws, doctor's job is still to surface diagnostics — so we
- * pre-configure the builder, then re-read the configured seam's diagnostics
- * even after a boot throw. This is the whole point of `doctor`: failure
- * should be observable, not opaque.
- */
-export declare function runDoctor(discovered: DiscoveredApp, opts: DoctorRunOptions): Promise<DotCliEnvelope<unknown>>;
-type MainOptions = {
-    argv: readonly string[];
-    stdout?: (line: string) => void;
-    stderr?: (line: string) => void;
-    now?: () => Date;
-};
-/**
- * Run the CLI. Returns the exit code so tests can assert without calling
- * `process.exit`. Real entry point at the bottom of the file calls `exit()`.
- */
-export declare function main(options: MainOptions): Promise<number>;
-/**
- * Re-exports for test consumers and adapter packages.
- */
-export { DotCliError, DotCliErrorCode, dotCliDocsUrl };
-export type { DotCliEnvelope, DotCliEnvelopeStatus } from './render-explain.js';
+/** The `dot` program. `program.main(argv, io)` runs one command line without touching the process. */
+export declare const program: import("@arki/cli").Program;
+export { runDev } from './dev.js';
+export type { DevResult, RunDevOptions } from './dev.js';
+export { devEventSchema } from './dev-events.js';
+export type { DevEvent } from './dev-events.js';
+export { DEV_STATE_PATH, devStateSchema } from './dev-state.js';
+export type { DevState } from './dev-state.js';
+export { runDoctor } from './doctor.js';
+export type { DoctorOptions } from './doctor.js';
+export { runExplain } from './explain.js';
+export type { ExplainData, ExplainOptions } from './explain.js';
+export { AppImportFailed, AppInvalidExport, AppLifecycleFailed, AppNotFound, DevAlreadyRunning, DevAppStarted, DevDbUnreachable, DevPortInUse, DevPreflightFailed, DevRemoteDbRefused, DevRunnerFailed, DoctorFailed, ObservabilityNoSdk, PreflightFailed, ProjectionConflict, ProjectionExecutionFailed, ProjectionImportFailed, ProjectionNotFound, TargetNotEmpty, TemplateMissing, WriteFailed, } from './failures.js';
+export type { DoctorReport, DoctorStatus } from './failures.js';
+export { EnvCheckFailed, EnvCommandFailed, EnvDecryptTracked, EnvKeyNotFound, EnvLoadFailed, EnvNoChange, EnvNoHeader, EnvPlainSecret, EnvRevealRefused, EnvValueMissing, EnvVaultFailed, EnvVaultWriteUnconfirmed, } from './env-failures.js';
+export type { EnvFinding } from './env-failures.js';
+export type { DotNewOperation, DotNewResult } from './json.js';
 export { runNew } from './new.js';
-export type { DotNewEnvelope, DotNewOperation } from './json.js';
+export type { RunNewOptions } from './new.js';
+export type { GraphData } from './render-graph.js';
+export type { ProjectionData } from './render-projection.js';
 //# sourceMappingURL=index.d.ts.map

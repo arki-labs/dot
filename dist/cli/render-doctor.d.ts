@@ -1,26 +1,18 @@
 /**
- * Renderers for `dot doctor`.
+ * `dot doctor`'s verdict and text renderer.
  *
- * Reads a booted (or fully-failed) app's `diagnostics` snapshot and emits
- * either a JSON envelope or a human-readable per-plugin status report.
- *
- * Envelope `status` reflects the worst severity present:
+ * The verdict is the worst severity among every issue in the snapshot:
  *   - `failure` if any issue has severity `error`
  *   - `warning` if any issue has severity `warning` (and no errors)
  *   - `success` otherwise
  */
-import type { DotDiagnosticsSnapshot } from '../diagnostics.js';
-import type { DotCliEnvelope, RenderOptions } from './render-explain.js';
-export type DoctorSource = {
-    diagnostics: DotDiagnosticsSnapshot;
-};
-/**
- * Compose the JSON envelope. Pure — no IO. Useful for tests and embedding.
- */
-export declare function buildDoctorEnvelope(source: DoctorSource, opts: RenderOptions): DotCliEnvelope<DotDiagnosticsSnapshot>;
-/**
- * Render the doctor output. Returns the envelope so callers can act on it
- * (e.g. set the process exit code based on `status`).
- */
-export declare function renderDoctor(source: DoctorSource, opts: RenderOptions): DotCliEnvelope<DotDiagnosticsSnapshot>;
+import type { Ui } from '@arki/cli';
+import type { DiagnosticIssue, DotDiagnosticsSnapshot } from '../diagnostics.js';
+import type { DoctorReport, DoctorStatus } from './failures.js';
+/** Every issue in the snapshot: top-level, then per unit, action, service and lifecycle entry. */
+export declare function allIssues(snap: DotDiagnosticsSnapshot): DiagnosticIssue[];
+/** The worst severity among all the snapshot's issues. */
+export declare function doctorStatus(snap: DotDiagnosticsSnapshot): DoctorStatus;
+/** Print the report as text: per-unit status, services, actions, lifecycle and app-level issues, the verdict. */
+export declare function renderDoctorText(report: DoctorReport, ui: Ui): void;
 //# sourceMappingURL=render-doctor.d.ts.map

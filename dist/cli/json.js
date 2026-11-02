@@ -1,9 +1,6 @@
 /**
- * JSON envelope shapes for the `dot new` command.
- *
- * The envelope mirrors `DotCliEnvelope` in spirit but exposes the
- * scaffold-specific `app` + `operations` payload directly at the top level
- * so consumers don't have to dig under a generic `data` field.
+ * The `data` shape of `dot new`: the app and the file operations, without
+ * the in-memory file contents.
  */
 /** Strip the in-memory `content` field before serialising. */
 export function toPublicOperation(op) {

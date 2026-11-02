@@ -1,14 +1,14 @@
 /**
  * ASCII waterfall renderer for DOT lifecycle diagnostics.
  *
- * Given a `DotDiagnosticsSnapshot`, builds a compact per-phase, per-plugin
+ * Given a `DotDiagnosticsSnapshot`, builds a compact per-phase, per-unit
  * duration chart suitable for printing in a terminal or embedding in a
  * `dot doctor` text report. No colour, no Unicode beyond `█` so the
  * output stays clean in log aggregators and CI.
  *
  * @example
  * ```
- * Timeline: my-app (state=booted)
+ * Timeline: pizzeria (state=booted)
  * ─────────────────────────────────────────────────────────
  * configure
  *   env       0.5ms  █
@@ -58,10 +58,9 @@ export function renderTimeline(snapshot, opts = {}) {
     }
     const lines = [];
     const title = `Timeline: ${snapshot.app.name} (state=${snapshot.app.state})`;
-    lines.push(title);
-    lines.push('─'.repeat(title.length));
-    // Layout: 2-space indent, 10-char plugin column, 8-char duration column, then bar.
-    const PLUGIN_COL = 12;
+    lines.push(title, '─'.repeat(title.length));
+    // Layout: 2-space indent, 10-char unit column, 8-char duration column, then bar.
+    const UNIT_COL = 12;
     const DUR_COL = 8;
     const indent = '  ';
     let anyRendered = false;
@@ -77,9 +76,9 @@ export function renderTimeline(snapshot, opts = {}) {
             const durationMs = entry.durationMs ?? 0;
             const bar = makeBar(durationMs, maxDuration, barWidth);
             const failedMark = entry.state === 'failed' ? ' ✗' : '';
-            const pluginCol = entry.plugin.padEnd(PLUGIN_COL);
+            const unitCol = entry.plugin.padEnd(UNIT_COL);
             const durCol = formatDuration(durationMs).padStart(DUR_COL);
-            lines.push(`${indent}${pluginCol}${durCol}  ${bar}${failedMark}`);
+            lines.push(`${indent}${unitCol}${durCol}  ${bar}${failedMark}`);
             if (showIssues && entry.issues.length > 0) {
                 for (const issue of entry.issues) {
                     lines.push(`${indent}  └─ ${issue.code}: ${issue.message}`);
@@ -87,11 +86,11 @@ export function renderTimeline(snapshot, opts = {}) {
             }
         }
     }
-    if (!anyRendered) {
-        lines.push('(no lifecycle entries — app has not run any phase yet)');
+    if (anyRendered) {
+        lines.push('─'.repeat(title.length));
     }
     else {
-        lines.push('─'.repeat(title.length));
+        lines.push('(no lifecycle entries — app has not run any phase yet)');
     }
     return lines.join('\n');
 }

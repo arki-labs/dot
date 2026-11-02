@@ -1,12 +1,15 @@
+import type { Clock } from '@arki/clock';
+import type { Failure } from '@arki/failure';
 /**
  * Public entry point for the DOT kernel (v2).
  *
  * `defineApp(name)` returns a `DotAppBuilder` that accumulates units in three
  * hexagonal steps, then transitions through the 5-hook lifecycle:
  *
- *   defineApp -> use* -> features? -> serve* -> configure() -> boot() -> start() -> stop() -> dispose()
+ *   defineApp(name).infra(...).features([...]).entrypoints(...)
+ *     -> configure() -> boot() -> start() -> stop() -> dispose()
  *
- * `.use()` is compile-time guarded: a plugin whose `needs` are not satisfied
+ * Each step is compile-time guarded: a unit whose `needs` are not satisfied
  * by services provided so far — or whose provides collide with existing
  * wire keys — fails to typecheck at the call site ("Expected 2 arguments,
  * but got 1", with the diagnostic embedded in the expected second
@@ -18,12 +21,15 @@
  *
  * See `./lifecycle.ts` for hook semantics, failure ordering, idempotency rules.
  */
+import type { AnyDefinedFeature } from './define-feature.js';
 import type { DotDiagnosticsSnapshot } from './diagnostics.js';
+import type { EntrypointBinder, InfraBinder } from './feature.js';
+import type { DotBootOutcome, DotConfigureOutcome, DotDisposeOutcome, DotStartedOutcome, DotStartOutcome, DotStopOutcome } from './kernel/app-instance.js';
 import type { DotLifecycleObserver } from './lifecycle-observer.js';
 import type { DotLifecycleState } from './lifecycle.js';
 import type { DotAppManifest } from './manifest.js';
-import type { AnyFeature, Driven, Driver, PluginsOf } from './feature.js';
-import type { AnyPlugin, EmptyShape, Plugin, ServiceRecord } from './plugin-contract.js';
+import type { AnyUnit, EmptyPhases, EmptyShape, MergePhases, RuntimeUnit, ServiceRecord, UnitCloseFailure, UnitOpenFailure, UnitPhaseFailures, UnitPhases, UnitRole, UnitSourceGuard, UnitWiring } from './unit-contract.js';
+import type { MaxIndex, NextIndex } from './tuple-index.js';
 type MissingKeys<TAvail, TNeeds> = {
     readonly [K in Exclude<keyof TNeeds, keyof TAvail>]: TNeeds[K];
 };
@@ -34,7 +40,7 @@ type MismatchedKeys<TAvail, TNeeds> = {
     };
 };
 type NeedsError<TAvail extends ServiceRecord, TNeeds extends ServiceRecord> = {
-    readonly 'DOT: this unit needs services that nothing before it provides. Mount their providers earlier (.use → .features → .serve)': {
+    readonly 'DOT: this unit needs services that nothing before it provides. Mount their providers earlier (.infra → .features → .entrypoints)': {
         readonly missing: MissingKeys<TAvail, TNeeds>;
         readonly mismatched: MismatchedKeys<TAvail, TNeeds>;
     };
@@ -43,55 +49,127 @@ type CollisionError<TAvail, TProvides> = {
     readonly 'DOT: this unit provides a key that an earlier unit already provides. Give one of them a new key with rename()': keyof TAvail & keyof TProvides;
 };
 /**
- * A plugin whose `boot` always throws infers `TProvides = never`, which would
+ * A unit whose `boot` always throws infers `TProvides = never`, which would
  * poison both the collision check (`keyof never` matches everything) and
- * the accumulated record (`TAvail & never` = `never`). Such a plugin provides
+ * the accumulated record (`TAvail & never` = `never`). Such a unit provides
  * nothing — normalize to the empty shape.
  */
 export type NormalizeProvides<TP extends ServiceRecord> = [TP] extends [never] ? EmptyShape : TP;
 /**
- * Rest-tuple guard. Satisfied → `[]` (call `.use(plugin)` with one argument).
- * Violated → a required second argument of an unconstructible error type,
- * so the call site fails with the diagnostic embedded in the expected type.
+ * One unit's wiring check. Satisfied → `[]`; violated → `[error]` with the
+ * diagnostic as the error type. `ListGuard` turns it into a type on the
+ * argument itself, so the call site fails on the unit with the `DOT:`
+ * label in the message (not with "Expected 2 arguments, but got 1").
+ * The open record (`DotAppBuilder<ServiceRecord>`, the erased builder a
+ * runtime-built unit list gives) has nothing to check: the kernel checks
+ * it at boot.
  */
-export type UseGuard<TAvail extends ServiceRecord, TNeeds extends ServiceRecord, TProvides extends ServiceRecord> = [TAvail] extends [TNeeds] ? [keyof TAvail & keyof TProvides] extends [never] ? [] : [error: CollisionError<TAvail, TProvides>] : [error: NeedsError<TAvail, TNeeds>];
-type UseAllState<TAvail extends ServiceRecord, TPlugins extends readonly AnyPlugin[]> = TPlugins extends readonly [
-    infer Head,
-    ...infer Tail
-] ? Head extends Plugin<infer TNeeds, infer TProvides> ? UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>> extends [] ? UseAllState<TAvail & NormalizeProvides<TProvides>, Extract<Tail, readonly AnyPlugin[]>> : {
-    readonly avail: TAvail;
-    readonly error: {
-        readonly 'DOT: a unit in this list cannot be mounted at its position': UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>>[0];
-    };
-} : {
-    readonly avail: TAvail;
-    readonly error: {
-        readonly 'DOT: this list accepts only plugins': Head;
-    };
-} : {
+export type UseGuard<TAvail extends ServiceRecord, TNeeds extends ServiceRecord, TProvides extends ServiceRecord, TUnit = EmptyShape> = UnitSourceGuard<TUnit> extends [] ? string extends keyof TAvail ? [] : [TAvail] extends [TNeeds] ? [keyof TAvail & keyof TProvides] extends [never] ? [] : [error: CollisionError<TAvail, TProvides>] : [error: NeedsError<TAvail, TNeeds>] : UnitSourceGuard<TUnit>;
+/**
+ * Entry to the walk. The `[...infer All]` match is one copy of the tuple, and
+ * it is what ends the walk for a GENERIC list: there `All` is its constraint
+ * (`readonly AnyUnit[]`), `0 extends number` holds, and the walk stops at
+ * step 0 instead of expanding `NextIndex` forever while TypeScript computes
+ * the conditional's constraint.
+ */
+type UseAllState<TAvail extends ServiceRecord, TUnits extends readonly AnyUnit[]> = TUnits extends readonly [
+    ...infer All extends readonly AnyUnit[]
+] ? UseAllWalk<TAvail, All, 0> : {
     readonly avail: TAvail;
     readonly error: never;
 };
-export type UseAllAvail<TAvail extends ServiceRecord, TPlugins extends readonly AnyPlugin[]> = UseAllState<TAvail, TPlugins>['avail'];
-type UseAllTupleGuard<TPlugins extends readonly AnyPlugin[]> = number extends TPlugins['length'] ? [
+type UseAllWalk<TAvail extends ServiceRecord, TUnits extends readonly AnyUnit[], I extends number> = I extends TUnits['length'] ? {
+    readonly avail: TAvail;
+    readonly error: never;
+} : I extends MaxIndex ? {
+    readonly avail: TAvail;
+    readonly error: {
+        readonly 'DOT: a list may hold at most this many units': MaxIndex;
+    };
+} : UseGuard<TAvail, UnitWiring<TUnits[I]>['needs'], NormalizeProvides<UnitWiring<TUnits[I]>['provides']>, TUnits[I]> extends [] ? UseAllWalk<TAvail & NormalizeProvides<UnitWiring<TUnits[I]>['provides']>, TUnits, NextIndex[I]> : {
+    readonly avail: TAvail;
+    readonly error: {
+        readonly 'DOT: a unit in this list cannot be mounted at its position': UseGuard<TAvail, UnitWiring<TUnits[I]>['needs'], NormalizeProvides<UnitWiring<TUnits[I]>['provides']>, TUnits[I]>[0];
+    };
+};
+export type UseAllAvail<TAvail extends ServiceRecord, TUnits extends readonly AnyUnit[]> = UseAllState<TAvail, TUnits>['avail'];
+type UseAllTupleGuard<TUnits extends readonly AnyUnit[]> = number extends TUnits['length'] ? [
     error: {
-        readonly 'DOT: pass a tuple. Add `as const`, or list the units inline in boot order': TPlugins;
+        readonly 'DOT: pass a tuple. Add `as const`, or list the units inline in boot order': TUnits;
     }
 ] : [];
-export type UseAllGuard<TAvail extends ServiceRecord, TPlugins extends readonly AnyPlugin[]> = [
-    UseAllState<TAvail, TPlugins>['error']
-] extends [never] ? UseAllTupleGuard<TPlugins> : [error: UseAllState<TAvail, TPlugins>['error']];
+export type UseAllGuard<TAvail extends ServiceRecord, TUnits extends readonly AnyUnit[]> = [
+    UseAllState<TAvail, TUnits>['error']
+] extends [never] ? UseAllTupleGuard<TUnits> : [error: UseAllState<TAvail, TUnits>['error']];
+/**
+ * `UseAllGuard` as a rest-parameter check: `unknown` when the list mounts,
+ * otherwise the error record — intersected with the argument tuple, so the
+ * call fails with the diagnostic in the expected type.
+ */
+export type ListGuard<TGuard extends readonly unknown[]> = TGuard extends readonly [error: infer TError] ? TError : unknown;
+/** The names (or positions) of the units in a list whose role a step refuses. */
+type RefusedUnits<TUnits extends readonly unknown[], TRefused extends UnitRole> = {
+    readonly [K in keyof TUnits]: TUnits[K] extends {
+        readonly role: TRefused;
+    } ? TUnits[K] extends {
+        readonly name: infer N extends string;
+    } ? N : never : never;
+}[number];
+/** The positions of bare `unit()` values in a list: they carry no role, so no step may mount them. */
+type BareUnits<TUnits extends readonly unknown[]> = {
+    readonly [K in keyof TUnits]: TUnits[K] extends {
+        readonly role?: undefined;
+        readonly name: infer N extends string;
+    } ? N : never;
+}[number];
+/**
+ * A step's role check, as a rest-parameter intersection like {@link ListGuard}:
+ * `unknown` when every unit belongs on this side, else a `DOT:` record naming
+ * the offenders. `.infra()` refuses entrypoints; `.entrypoints()` refuses infra
+ * and feature units; neither mounts a bare `unit()`. Erased units (`AnyUnit`)
+ * pass here and are checked at configure time (`ARKI_DOT_E033`).
+ */
+export type SideGuard<TUnits extends readonly unknown[], TRefused extends UnitRole> = [
+    RefusedUnits<TUnits, TRefused>
+] extends [never] ? [BareUnits<TUnits>] extends [never] ? unknown : {
+    readonly 'DOT: a bare unit() has no role. Write infra({...}) or entrypoint({...})': BareUnits<TUnits>;
+} : [TRefused] extends ['entrypoint'] ? {
+    readonly 'DOT: an entrypoint cannot be mounted as infra. Mount it with .entrypoints(...)': RefusedUnits<TUnits, TRefused>;
+} : {
+    readonly 'DOT: only entrypoints mount here. Mount infra with .infra(...) and features with .features([...])': RefusedUnits<TUnits, TRefused>;
+};
+/** A list of units and adapters, each seen as the unit it mounts (an adapter's `bind` result). */
+type AsUnits<TUnits extends readonly unknown[]> = {
+    readonly [K in keyof TUnits]: TUnits[K] extends {
+        readonly bind: (features: never) => infer TUnit;
+    } ? TUnit : TUnits[K];
+};
+/** The kernel units one feature mounts: its `units()`. */
+type UnitsOfFeature<TFeature> = TFeature extends {
+    units(): infer TUnits extends readonly AnyUnit[];
+} ? TUnits : never;
+/** Index walk (see `NextIndex` / `UseAllState`): `[infer Head, ...infer Tail]` would re-slice the list at every feature. */
+type FlattenUnits<TFeatures extends readonly unknown[]> = TFeatures extends readonly [
+    ...infer All extends readonly unknown[]
+] ? FlattenWalk<All, 0, readonly []> : readonly AnyUnit[];
+type FlattenWalk<TFeatures extends readonly unknown[], I extends number, TAcc extends readonly AnyUnit[]> = I extends TFeatures['length'] ? TAcc : I extends MaxIndex ? readonly AnyUnit[] : FlattenWalk<TFeatures, NextIndex[I], readonly [...TAcc, ...UnitsOfFeature<TFeatures[I]>]>;
+/**
+ * Every kernel unit a feature list mounts, flattened in order — what
+ * `.features()` checks with the `UseAllGuard`. A non-tuple list stays an
+ * array, so the guard asks for a tuple.
+ */
+export type FeatureUnits<TFeatures extends readonly AnyDefinedFeature[]> = number extends TFeatures['length'] ? readonly AnyUnit[] : FlattenUnits<TFeatures>;
 /**
  * Public DotApp surface. The internal `DotAppImpl` implements this; consumers
  * see only these members.
  */
-export type DotApp<TServices extends ServiceRecord> = {
+export type DotApp<TServices extends ServiceRecord, TClose extends Failure = never, _TOpen extends Failure = never, TPhases extends UnitPhases = EmptyPhases> = {
     /** App name (passed to `defineApp`). */
     readonly name: string;
     /** Current lifecycle state. */
     readonly state: DotLifecycleState;
     /**
-     * Services published by booted plugins, keyed by wire key.
+     * Services published by booted units, keyed by wire key.
      * Empty before `boot()` succeeds.
      */
     readonly services: TServices;
@@ -101,19 +179,19 @@ export type DotApp<TServices extends ServiceRecord> = {
     readonly diagnostics: DotDiagnosticsSnapshot;
     /**
      * Start active work. Boots first if app is `defined` or `configured`.
-     * Idempotent while `started`. Throws if app is `failed` or `disposed`.
+     * Idempotent while `started`. Returns a defect if the app is `failed` or `disposed`.
      */
-    start(): Promise<void>;
+    start(): Promise<DotStartedOutcome<TClose, TPhases>>;
     /**
      * Stop active work. Keeps booted resources for later cleanup.
      * Idempotent while not `started`.
      */
-    stop(): Promise<void>;
+    stop(): Promise<DotStopOutcome<TPhases>>;
     /**
      * Release booted resources. Runs stop() first if `started`.
      * Idempotent while `disposed`.
      */
-    dispose(): Promise<void>;
+    dispose(): Promise<DotDisposeOutcome<TClose, TPhases>>;
     /**
      * Register an in-process lifecycle observer. Returns an unsubscribe
      * function. Observers added here see events from this point onward —
@@ -132,82 +210,62 @@ export type DotApp<TServices extends ServiceRecord> = {
  * Intermediate type after `configure()` but before `boot()`.
  * Exposes the manifest and diagnostics already, but no `services` yet.
  */
-export type DotAppConfigured<TServices extends ServiceRecord> = {
+export type DotAppConfigured<TServices extends ServiceRecord, TOpen extends Failure = never, TClose extends Failure = never, TPhases extends UnitPhases = EmptyPhases> = {
     readonly name: string;
     readonly state: DotLifecycleState;
     readonly manifest: DotAppManifest;
     readonly diagnostics: DotDiagnosticsSnapshot;
     /** Continue the lifecycle. */
-    boot(): Promise<DotApp<TServices>>;
-    start(): Promise<DotApp<TServices>>;
+    boot(): Promise<DotApp<TServices, TClose, TOpen, TPhases> | Exclude<DotBootOutcome<TOpen, TClose, TPhases>, void>>;
+    start(): Promise<DotApp<TServices, TClose, TOpen, TPhases> | Exclude<DotStartOutcome<TOpen, TClose, TPhases>, void>>;
     /** See {@link DotApp.subscribe}. */
     subscribe(observer: DotLifecycleObserver): () => void;
     /** See {@link DotApp.timeline}. */
     timeline(): string;
 };
 /** Lifecycle entry points every builder phase shares. */
-export type DotAppLifecycle<TAvail extends ServiceRecord> = {
-    /** Run the configure phase synchronously. Throws on configure failure. */
-    configure(): DotAppConfigured<TAvail>;
-    /** Run configure + boot. Throws on configure or boot failure. */
-    boot(): Promise<DotApp<TAvail>>;
-    /** Convenience: configure + boot + start. */
-    start(): Promise<DotApp<TAvail>>;
-};
+export type DotAppLifecycle<TAvail extends ServiceRecord, TOpen extends Failure = never, TClose extends Failure = never, TPhases extends UnitPhases = EmptyPhases> = Pick<Builder<TAvail, TOpen, TClose, TPhases>, 'configure' | 'boot' | 'start'>;
 /**
- * Builder after `.features()` or `.serve()` — only driving adapters remain.
- * Driven adapters (`.use`) cannot follow the domain: infrastructure never
- * depends on a feature.
+ * Builder after `.features()` — only `.entrypoints()` remains.
+ * Infra cannot follow the domain: infrastructure never depends on a feature.
  */
-export type DotServeBuilder<TAvail extends ServiceRecord> = DotAppLifecycle<TAvail> & {
-    /**
-     * Register a driving adapter (HTTP server, job worker, scheduler). A
-     * `driver(...)` is bound to the features mounted by `.features()`; a
-     * plain plugin is mounted as-is. Same compile-time guard as `.use()`.
-     */
-    serve<TNeeds extends ServiceRecord, TProvides extends ServiceRecord>(adapter: Plugin<TNeeds, TProvides> | Driver<TNeeds, TProvides>, ...guard: UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>>): DotServeBuilder<TAvail & NormalizeProvides<TProvides>>;
-};
+export type DotServeBuilder<TAvail extends ServiceRecord, TOpen extends Failure = never, TClose extends Failure = never, TPhases extends UnitPhases = EmptyPhases> = Pick<Builder<TAvail, TOpen, TClose, TPhases>, keyof DotAppLifecycle<TAvail, TOpen, TClose, TPhases> | 'entrypoints'>;
 /**
  * Builder produced by `defineApp(name)`. The app reads as a hexagon:
  *
- *   .use(...)        driven adapters — what features need (db, kv, queue client)
- *   .features([...]) the domain core
- *   .serve(...)      driving adapters — what calls the features (http, workers)
+ *   .infra(...)       what features need (db, kv, queue client)
+ *   .features([...])  the domain core
+ *   .entrypoints(...) what calls the features (http, workers)
  *
  * Each step is type-tracking in both directions: a unit's `needs` must be
  * satisfied by the services accumulated so far, and its `provides` merge
  * into the accumulated record for the next step.
  */
-export type DotAppBuilder<TAvail extends ServiceRecord> = DotAppLifecycle<TAvail> & {
-    /**
-     * Register a driven adapter. Compile error when the plugin's needs are
-     * unsatisfied or its provides collide with existing wire keys.
-     *
-     * A `driven(...)` adapter is bound when the app is built, to the full
-     * feature list — so it can read the features' static declarations (their
-     * `use` slices) while still booting BEFORE them. A `driver(...)` is
-     * rejected here: it calls into the features, so it belongs in `.serve()`.
-     */
-    use<TNeeds extends ServiceRecord, TProvides extends ServiceRecord>(plugin: Plugin<TNeeds, TProvides> | Driven<TNeeds, TProvides>, ...guard: UseGuard<TAvail, TNeeds, NormalizeProvides<TProvides>>): DotAppBuilder<TAvail & NormalizeProvides<TProvides>>;
-    /**
-     * Register a tuple of plugins in declaration order. This is type-equivalent
-     * to calling `.use()` for each item and keeps the same ordering/collision
-     * guard across the whole tuple.
-     */
-    useAll<const TPlugins extends readonly AnyPlugin[]>(plugins: TPlugins, ...guard: UseAllGuard<TAvail, TPlugins>): DotAppBuilder<UseAllAvail<TAvail, TPlugins>>;
-    /**
-     * Mount the domain features, in order. A feature may need what earlier
-     * features provide. Called once: after it, only `.serve()` remains.
-     */
-    features<const TFeatures extends readonly AnyFeature[]>(features: TFeatures, ...guard: UseAllGuard<TAvail, Extract<PluginsOf<TFeatures>, readonly AnyPlugin[]>>): DotServeBuilder<UseAllAvail<TAvail, Extract<PluginsOf<TFeatures>, readonly AnyPlugin[]>>>;
-} & Pick<DotServeBuilder<TAvail>, 'serve'>;
+export type DotAppBuilder<TAvail extends ServiceRecord, TOpen extends Failure = never, TClose extends Failure = never, TPhases extends UnitPhases = EmptyPhases> = Pick<Builder<TAvail, TOpen, TClose, TPhases>, keyof Builder<TAvail, TOpen, TClose, TPhases>>;
+type BuilderState<TOpen extends Failure = never, TClose extends Failure = never, TPhases extends UnitPhases = EmptyPhases> = {
+    appName: string;
+    appVersion?: string;
+    /** An `InfraBinder` is bound to the final feature list at build time. */
+    plugins: (RuntimeUnit<TOpen, TClose, TPhases> | InfraBinder<ServiceRecord, ServiceRecord, {
+        open: TOpen;
+        close: TClose;
+    }, TPhases>)[];
+    /** The features mounted by `.features()`, as written — what entrypoints are bound to. */
+    features: readonly AnyDefinedFeature[];
+    /** Units mounted on the wrong side, in an erased graph the types could not check. `configure()` refuses the app. */
+    misplaced: readonly MisplacedUnit[];
+    config?: Readonly<Record<string, unknown>>;
+    observers?: readonly DotLifecycleObserver[];
+    hookTimeoutMs?: number;
+    clock?: Clock;
+};
 /**
  * Create a new DOT app builder.
  *
  * @example
- * const app = await defineApp('my-app')
- *   .use(dbPlugin)
- *   .use(billingPlugin)   // billing's needs must be satisfied by now
+ * const app = await defineApp('pizzeria')
+ *   .infra(database, cache)   // cache's needs must be satisfied by database
+ *   .features([billing])
  *   .boot();
  *
  * await app.start();
@@ -228,13 +286,45 @@ export declare function defineApp(name: string, options?: {
     /**
      * Watchdog budget (ms) for each async hook invocation (`boot`, `start`,
      * `stop`, `dispose` — `configure` is sync). A hook exceeding the budget
-     * fails with `DOT_LIFECYCLE_E015` naming the plugin and hook, and the
+     * fails with `ARKI_DOT_E015` naming the unit and hook, and the
      * kernel applies its normal failure rules (boot rollback, teardown
      * aggregation). The hook's promise itself cannot be cancelled — the
      * watchdog makes the hang *visible*, it does not kill it. Default:
      * no watchdog.
      */
     hookTimeoutMs?: number;
+    clock?: Clock;
 }): DotAppBuilder<EmptyShape>;
+/** A builder step and the role it gives a unit that has none. */
+type Step = {
+    readonly name: 'infra';
+    readonly role: 'infra';
+} | {
+    readonly name: 'entrypoints';
+    readonly role: 'entrypoint';
+};
+/** A unit an erased graph mounted on the wrong side; `configure()` refuses the app with `ARKI_DOT_E033`. */
+type MisplacedUnit = {
+    readonly name: string;
+    readonly role: UnitRole;
+    readonly step: Step['name'];
+};
+/** Internal dynamic-list entrypoint; unlike `.infra(...list)`, this does not claim tuple wiring checks. */
+export declare function mountUnits<Open extends Failure, Close extends Failure, Services extends ServiceRecord = ServiceRecord, Phases extends UnitPhases = EmptyPhases>(name: string, plugins: readonly RuntimeUnit<Open, Close, Phases>[], options?: Parameters<typeof defineApp>[1]): DotAppBuilder<Services, Open, Close, Phases>;
+/** One checked implementation supplies both public builder phases. */
+declare class Builder<TAvail extends ServiceRecord, TOpen extends Failure, TClose extends Failure, TPhases extends UnitPhases> {
+    #private;
+    constructor(state: BuilderState<TOpen, TClose, TPhases>);
+    private append;
+    /** Register infrastructure in boot order, before the domain. */
+    infra<const Units extends readonly (AnyUnit | InfraBinder)[]>(...units: Units & SideGuard<Units, 'entrypoint'> & ListGuard<UseAllGuard<TAvail, Extract<AsUnits<Units>, readonly AnyUnit[]>>>): DotAppBuilder<UseAllAvail<TAvail, Extract<AsUnits<Units>, readonly AnyUnit[]>>, TOpen | UnitOpenFailure<AsUnits<Units>[number]>, TClose | UnitCloseFailure<AsUnits<Units>[number]>, MergePhases<TPhases, UnitPhaseFailures<AsUnits<Units>[number]>>>;
+    /** Mount the domain; later steps can register only driving adapters. */
+    features<const Features extends readonly AnyDefinedFeature[]>(features: Features & ListGuard<UseAllGuard<TAvail, Extract<FeatureUnits<Features>, readonly AnyUnit[]>>>): DotServeBuilder<UseAllAvail<TAvail, Extract<FeatureUnits<Features>, readonly AnyUnit[]>>, TOpen | UnitOpenFailure<FeatureUnits<Features>[number]>, TClose | UnitCloseFailure<FeatureUnits<Features>[number]>, MergePhases<TPhases, UnitPhaseFailures<FeatureUnits<Features>[number]>>>;
+    /** Register the app's driving adapters in argument order. */
+    entrypoints<const Adapters extends readonly (AnyUnit | EntrypointBinder)[]>(...adapters: Adapters & SideGuard<Adapters, 'infra' | 'feature'> & ListGuard<UseAllGuard<TAvail, Extract<AsUnits<Adapters>, readonly AnyUnit[]>>>): DotServeBuilder<UseAllAvail<TAvail, Extract<AsUnits<Adapters>, readonly AnyUnit[]>>, TOpen | UnitOpenFailure<AsUnits<Adapters>[number]>, TClose | UnitCloseFailure<AsUnits<Adapters>[number]>, MergePhases<TPhases, UnitPhaseFailures<AsUnits<Adapters>[number]>>>;
+    configure(): DotAppConfigured<TAvail, TOpen, TClose, TPhases> | Exclude<DotConfigureOutcome<TPhases>, void>;
+    boot(): Promise<DotApp<TAvail, TClose, TOpen, TPhases> | Exclude<DotConfigureOutcome<TPhases> | DotBootOutcome<TOpen, TClose, TPhases>, void>>;
+    start(): Promise<DotApp<TAvail, TClose, TOpen, TPhases> | Exclude<DotConfigureOutcome<TPhases> | DotStartOutcome<TOpen, TClose, TPhases>, void>>;
+}
 export {};
 //# sourceMappingURL=define-app.d.ts.map

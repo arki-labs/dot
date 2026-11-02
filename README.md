@@ -1,738 +1,337 @@
+Read-only mirror of `@arki/dot` v0.10.0. Source and issues: arki-labs/arki. Docs: https://arki.dev/packages/dot. Published 2026-11-02 with provenance https://www.npmjs.com/package/@arki/dot/v/0.10.0#provenance.
+
 # @arki/dot
 
-> TypeScript-first application composition framework for the ARKI package family.
+> Compose an app from typed units. The compiler checks the wiring. The kernel boots the units in declaration order and disposes them in reverse.
 
-`@arki/dot` is the kernel that wires **plugins**, lifecycle hooks, dependency
-injection, and diagnostics into a deterministic application boot. It gives
-library authors a stable contract for declaring how their package
-participates in an app, and gives app developers a single place to wire
-those packages together — with the type checker verifying the wiring before
-anything runs.
+A Dot app is a chain of units. Each unit has a role: infra (a database, a
+cache, a mailer), features (your domain), or entrypoints (an HTTP server, a
+worker, a scheduler). Each unit says what it needs, what it provides, and
+what to do at each of five lifecycle hooks: `configure`, `boot`, `start`,
+`stop` and `dispose`. Infra boots first, then features, then entrypoints.
+There is no hidden core: remove every unit and nothing is left. The units
+are the app.
 
-## What is a plugin?
-
-A **plugin** is the unit a DOT app is built from — one self-describing,
-lifecycle-aware piece of an application. Each plugin:
-
-- declares a **name**, **version**, and the services it **needs** as a shape
-  of type witnesses;
-- **provides** services by returning them from its `boot` hook — provides
-  are *inferred from the return type*, never declared separately;
-- runs a **5-hook lifecycle** — `configure` → `boot` → `start` → `stop` → `dispose`;
-- **publishes typed services** to a shared, type-safe registry that later
-  plugins can read from;
-- **composes deterministically** — plugins boot in declaration order and
-  dispose in reverse.
-
-The name comes from the small dots on dice, dominoes, and music notation:
-each plugin is one small mark, and the *combination* of plugins is what gives the
-app its value. Two plugins on a die make a value of two; six plugins make six. The
-plugins **are** the app — not optional add-ons to a hidden core.
-
-```ts
-import { defineApp } from '@arki/dot';
-import { env } from '@arki/env/dot';      // env plugin
-import { db } from '@arki/db/dot';        // db plugin
-import { kv } from '@arki/kv/dot';        // kv plugin
-
-const app = await defineApp('orders')
-  .use(env({ schema: { /* ... */ } }))     // 1st plugin — provides services.env
-  .use(db({ relations }))                  // 2nd plugin — provides services.db
-  .use(kv(() => ({ url: process.env.KV_URL }))) // 3rd — services.kv; env read at boot, not import
-  .boot();                                  // plugins boot in declaration order
-
-await app.services.db.query(/* ... */);
-await app.dispose();                       // plugins dispose in REVERSE order
+```text
+defineApp('pizzeria')  .infra(database)  .infra(stripe)  .start()
+                            │               │
+         boot / start:      1st ──────────▶ 2nd
+         stop / dispose:    2nd ◀────────── 1st
 ```
 
-Each `/dot` subpath exports a **plugin** for that package. The subpath names
-the framework the adapter targets (DOT), not the unit (which is a plugin).
+## Install
 
-> **Why not "plugin"?** Plugins suggest *optional add-ons* to a core. DOT's
-> reality is the opposite: there is no hidden core — the plugins *are* the app.
-> "Plugin" names that truth, and ties the framework to the DOT name etymologically
-> (a dot, a plugin, a small mark that gains meaning by combining with others).
-
-## Installation
-
-```bash
-npm install @arki/dot
-# or
+```sh
 bun add @arki/dot
+# or
+npm install @arki/dot
 ```
+
+The `dot` command ships in the same package.
 
 ## Quick start
 
-```ts
-import { defineApp, plugin, service } from '@arki/dot';
+```ts run
+import { defineApp, infra } from '@arki/dot';
+import { isFailure } from '@arki/failure';
 
-type Db = { query(sql: string): Promise<unknown[]> };
+// Stand-ins for your real database and Stripe clients.
+type Db = { query(sql: string): Promise<unknown[]>; close(): Promise<void> };
+const openDb = async (url = 'memory://'): Promise<Db> => ({ query: async sql => [url, sql], close: async () => {} });
+const makeStripeClient = (db: Db) => ({ charge: (cents: number) => db.query(`charge ${cents}`) });
 
-const dbPlugin = plugin({
+const database = infra({
   name: 'database',
-  async boot() {
-    const db = await openDb(process.env.DATABASE_URL);
-    return { db };                    // ← this IS the provides declaration
+  provides: {
+    db: () => openDb(process.env.DATABASE_URL), // ← one factory per key; may be async
   },
   async dispose({ db }) {
     await db.close();
   },
 });
 
-const billingPlugin = plugin({
-  name: 'billing',
-  version: '1.0.0',
-  needs: { db: service<Db>() },     // typed injection — destructure in hooks
+const stripe = infra({
+  name: 'stripe',
+  needs: { db: database.provides.db }, // typed handle — destructure in hooks
   configure(ctx) {
     // Validate config, register schemas, no I/O.
+    ctx.registerService('stripe', 'custom');
   },
-  async boot({ db }) {
-    // Open connections. The return value IS what this plugin provides.
-    return { stripe: makeStripeClient(db) };
+  provides: {
+    stripe: ({ db }) => makeStripeClient(db), // factories see the needs
+  },
+  async boot({ stripe }) {
+    await stripe.charge(0); // side effects only (seed, warm-up). Returns nothing.
   },
   async start({ stripe }) {
-    // Begin processing — workers, subscriptions, schedulers.
+    await stripe.charge(0); // begin processing — workers, subscriptions, schedulers.
   },
-  async stop({ stripe }) {
-    // Stop processing — drain workers, unsubscribe.
-  },
-  async dispose({ stripe }) {
-    // Close connections, free resources.
+  async stop({ db }) {
+    await db.query('select 1'); // stop processing — drain workers, unsubscribe.
   },
 });
 
-const app = await defineApp('acme')
-  .use(dbPlugin)          // providers before consumers — enforced at compile time
-  .use(billingPlugin)
+const app = await defineApp('pizzeria')
+  .infra(database, stripe) // providers before consumers — enforced at compile time
   .start();
+if (isFailure(app)) throw new Error(app.code);
 
 // app.manifest, app.diagnostics — agent-friendly envelopes.
+const order = app.manifest.plugins.map(p => p.name).join(' → ');
+if (order !== 'database → stripe') throw new Error(`units boot in declaration order, got ${order}`);
 
 await app.stop();
 await app.dispose();
 ```
 
 There is no registry to configure, no decorators, no reflection. The `needs`
-shape is the injection contract; the `boot` return type is the provision
+shape is the injection contract; the `provides` factories are the provision
 contract; the builder's type-level guard connects the two.
 
-## Dependency injection
+The [Quickstart](./docs/quickstart.md) builds a small app step by step,
+breaks it on purpose, and reads the error with `dot explain` and `dot doctor`.
 
-### Needs are witnesses, provides are inferred
+## When not to use this
 
-`service<T>()` creates a phantom **type witness** — a runtime no-op that
-carries `T` at the type level. The property name you give it is your local
-alias *and* (for anonymous witnesses) the wire key:
+- **You need a web server or a router.** Dot composes services. Serve HTTP
+  with TanStack Start, Hono or oRPC, and mount the server as a unit.
+- **You want units loaded from disk or from config.** Dot never
+  auto-loads. The app is the `.infra()` chain that the compiler reads.
+- **The program has one or two services.** A function with `try`/`finally`
+  is shorter. Dot pays off when several packages bring services with their
+  own setup and teardown.
+- **You need a scope per request.** Dot has one service graph per app. Keep
+  per-request values in your router's context.
 
-```ts
-const search = plugin({
-  name: 'search',
-  needs: {
-    db: service<Db>(),                 // wire key 'db', local alias 'db'
-    log: service<Logger>(),            // wire key 'log'
-  },
-  async boot({ db, log, $app }) {      // $app/$plugin/$config: kernel context
-    log.info(`indexing for ${$app}`);
-    return { search: await buildIndex(db) };
-  },
-});
-```
+## Runtime support
 
-`start`, `stop`, and `dispose` additionally receive the plugin's **own
-provides** — and because teardown runs in reverse declaration order, a plugin's
-needs are still alive in its `dispose`:
+The portable entries (`@arki/dot`, `@arki/dot/unit`, `@arki/dot/feature`, `@arki/dot/log`, `@arki/dot/test-harness`) run on Node, Bun, Deno, browsers and Hermes (React Native). The kernel reads `process`, `performance` and timers at call time, never at import, and falls back where the runtime has none: `hookSignals` hooks nothing without a `process`, and durations use `Date.now()` without `performance`.
 
-```ts
-async dispose({ search, db }) {        // own provide + still-live need
-  await search.flush(db);
-},
-```
+The adapter entries need more:
 
-### Wrong wiring does not compile
+| Entry                                | Needs                            | Why                               |
+| ------------------------------------ | -------------------------------- | --------------------------------- |
+| `@arki/dot/cli` and the `dot` binary | Node or Bun                      | Reads files, spawns processes.    |
+| `@arki/dot/orpc`                     | the optional `@orpc/server` peer | Wraps oRPC procedures as actions. |
 
-Declaration order IS boot order. The `.use()` guard makes unsatisfied needs,
-type mismatches, and key collisions **compile errors at the call site**:
+`bun run test:runtimes` boots a small app through the portable API on every leg, from the built `dist/`.
 
-```ts
-defineApp('shop')
-  .use(billing)      // ❌ "Expected 2 arguments, but got 1."
-  .use(database);    //    billing's `db` need has no earlier provider
+## Public imports
 
-defineApp('shop')
-  .use(database)
-  .use(database2);   // ❌ collision: two providers of wire key 'db'
-```
+| Import                   | What it gives you                                                                                              |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `@arki/dot`              | `defineApp`, `infra`, `entrypoint`, `service`, `token`, `lazy`, `rename`, `hookSignals`, `reportErrors`, `logHandlers`, the errors and the manifest types. |
+| `@arki/dot/unit`       | The unit author's surface: `infra`, `entrypoint`, `unit`, handles, tokens, `rename` and the contract types.                       |
+| `@arki/dot/feature`      | `defineFeature`, `infra` / `entrypoint` (with `fromFeatures`), `routerFor`, `entrypointOnly` and the services bag for domain modules.         |
+| `@arki/dot/orpc`         | `rpcFor`, `rpc`, `step`, `around`, `needsMiddleware`. Needs the optional peer `@orpc/server`.          |
+| `@arki/dot/log`          | `log()`, the logging unit. Mount it first.                                                                   |
+| `@arki/dot/runtime`      | `createAppRuntime`: one started app per server process, safe under Vite hot updates.                           |
+| `@arki/dot/test-harness` | `testUnit`, `testApp`, `bootTestApp`, `fake`.                                                                |
+| `@arki/dot/action` | Browser-safe `action`, canonical execution failures and exposure policy. |
+| `@arki/dot/execute` | Server `bindAction`: `run` validates raw values; `handle` reuses native parsing. |
+| `@arki/dot/telemetry` | Identity-scoped `telemetryFor`, spans, events, metrics and correlated logs. |
+| `@arki/dot/cli`          | `program` (the `dot` command), `runExplain`, `runDoctor`, `runNew`, `runDev` and the `dot.*` failures.         |
 
-Reordering the first example — or `rename`-ing one provider in the second —
-makes both compile. The kernel re-validates at runtime with coded errors
-(`E012` unsatisfied need, `E013` collision, `E014` reserved key) for
-erased/dynamic composition, with full rollback of already-booted plugins.
+Read [Ownership](./docs/ownership.md) for resource descriptors, children, lazy retries and cancellation.
 
-There is no dependency graph to debug and **cycles are unrepresentable**:
-services flow strictly forward through the `.use()` chain. If two plugins need
-each other's services, that's a design smell the type system surfaces
-immediately — merge them, or extract the shared piece into a third plugin both
-consume.
+## Features as a chain
 
-### Features and the hexagon
+A feature is one chain, and each step sees only what is above it:
+`defineFeature(name).needs(…).infra(…).domainServices(…).features(…).usecases(…).provides(…).entrypoints(…)`.
+`.domainServices()` and `.features()` are optional. A domain service is logic
+with dependencies that two or more usecases share, or that a child feature
+needs. `DomainDeps` is what a domain service may ask for; `Deps` is what a
+usecase may ask for. `provides` sees only `{ usecases }`. Entrypoints see
+usecases, request keys and needs marked `entrypointOnly(...)`. Read
+[Dependency injection](./docs/di.md#features-as-a-chain-definefeature).
 
-Domain modules are `feature()` values from `@arki/dot/feature`. A feature is
-inert data: router fragments and repo factories fold without any kernel, and
-boot-time slices (`jobs()`, `schedules()`, `endpoints()`) say what the
-feature hands its adapters.
+## Steps and arounds
 
-```ts
-import { feature } from '@arki/dot/feature';
-
-export const orders = feature('orders', {
-  router: { orders: ordersRouter },
-  repos: { orders: createOrdersRepository },
-  needs: { db: service<Db>() },
-  use: [jobs({ syncOrders })],
-  boot: ({ db }) => ({ ordersIndex: openIndex(db) }),
-});
-```
-
-The app wires its units in three steps — the hexagon of ports and adapters:
+A step and an around are plain functions, written once. A step reads the
+context and returns keys to add, or a failure to refuse the call. An around
+wraps everything declared after it, for a transaction or a retry. Each
+transport attaches them with its own `step()` and `around()`: `@arki/dot/orpc`,
+`@arki/http`, `@arki/queue`, or `with: [...]` on schedules and CLI commands.
 
 ```ts
-defineApp('shop')
-  .use(db({ relations }))            // driven: what features need
-  .use(queue({ connection }))
-  .features([orders, billing])       // the domain
-  .serve(http({ port: 3000 }))       // driving: what calls the features
-  .serve(queueWorker({ q, needs: {}, context }));
+import { os } from '@orpc/server';
+
+import { around, step } from '@arki/dot/orpc';
+import { defineFailure } from '@arki/failure';
+import { errorMap } from '@arki/failure/orpc';
+
+type Db = { transaction<T>(work: () => Promise<T>): Promise<T> };
+const SignInRequired = defineFailure('shop.sign_in_required', { status: 401 });
+
+const authed = (ctx: { readonly userId: string | null }) =>
+  ctx.userId === null ? SignInRequired() : { userId: ctx.userId };
+const inTransaction = <T>(ctx: { readonly db: Db }, next: () => Promise<T>) => ctx.db.transaction(next);
+
+export const refund = os
+  .$context<{ userId: string | null; db: Db }>()
+  .errors(errorMap(SignInRequired)) // drop this line and `.use(step(authed))` does not compile
+  .use(step(authed))
+  .use(around(inTransaction))
+  .handler(({ context }) => ({ refundedBy: context.userId }));
 ```
 
-The order is a compile error, not a convention: `.use()` is closed after
-`.features()` (infrastructure never depends on the domain), a feature is not a
-plugin, and a driving adapter (`driver(...)`) cannot sit in `.use()`. Driving
-adapters are bound to the mounted features — `http()` serves every feature's
-routes without being told the list. `dot explain --graph` draws the three
-groups, numbered in boot order.
-
-### Tokens — cross-package service contracts
-
-An anonymous `service<T>()` couples consumer and provider by property name.
-When a contract spans packages, a **token** owns the wire key and the local
-alias becomes free choice:
-
-```ts
-// The package that owns the contract exports the token:
-export const Db = token<NodePgDatabase<Schema>>()('arki.db');
-
-// A provider publishes under the token's key:
-const database = plugin({
-  name: 'database',
-  async boot() {
-    return provide(Db, await connect());   // → { 'arki.db': NodePgDatabase }
-  },
-});
-
-// Any consumer, any package, any local alias:
-const reports = plugin({
-  name: 'reports',
-  needs: { warehouse: Db },                // wire key 'arki.db', alias yours
-  async boot({ warehouse }) { /* ... */ },
-});
-```
-
-### Multi-instance with `rename`
-
-Mounting an adapter twice would collide on its wire keys — loudly, at
-compile time. `rename` is the multi-instance primitive, and
-`Token.instance()` derives the matching contract:
-
-```ts
-const ReportsDb = Db.instance('reports');  // token for key 'arki.db#reports'
-
-const app = await defineApp('shop')
-  .use(database({ url: PRIMARY_URL }))
-  .use(rename(
-    database({ url: REPLICA_URL }),
-    { 'arki.db': ReportsDb.key },          // republish under the derived key
-    'reports-db',                          // distinct plugin name
-  ))
-  .use(plugin({
-    name: 'analytics',
-    needs: { primary: Db, replica: ReportsDb },
-    async boot({ primary, replica }) { /* two live instances, both typed */ },
-  }))
-  .boot();
-```
-
-Renames compose left-to-right and are applied at publish time — collision
-checks see the final keys.
-
-### Lazy services
-
-`lazy(init, { dispose })` publishes a **handle** instead of an open
-resource. Initialization runs on first `get()` (memoized, single-flight;
-failed attempts retry). Never-touched handles never initialize — and the
-kernel auto-disposes initialized ones during teardown, *after* the
-publishing plugin's own `dispose` hook, even if that plugin has none:
-
-```ts
-const search = plugin({
-  name: 'search',
-  async boot() {
-    return {
-      search: lazy(() => connectToElastic(), {
-        dispose: client => client.close(),
-      }),
-    };
-  },
-});
-```
-
-Consumers that shouldn't care whether a provider is eager or lazy declare a
-**lifting witness** — `service.lazy<T>()` always delivers a `Lazy<T>`
-handle, wrapping eager provides and passing lazy ones through by identity:
-
-```ts
-const suggestions = plugin({
-  name: 'suggestions',
-  needs: { search: service.lazy<SearchClient>() },
-  async start({ search }) {
-    const client = await search.get();     // first access initializes
-    /* ... */
-  },
-});
-```
-
-Swapping the search provider between eager and lazy is invisible to every
-consumer — the wiring guard accepts both shapes against the same witness.
-
-### Kernel context — the reserved `$` namespace
-
-Every service-carrying hook context includes `$app` (app name), `$plugin` (plugin
-name), and `$config` (the `defineApp(name, { config })` bag). The `$` prefix
-is enforced as reserved: `plugin()` rejects `$`-prefixed needs aliases and
-publish keys at compile time, and the kernel re-validates at runtime
-(`DOT_LIFECYCLE_E014`) — kernel keys can never be shadowed.
-
-## A complex setup
-
-A distilled commerce platform showing everything above working together.
-(The package's stress-test suite boots a 28-plugin version of this and asserts
-exact boot/teardown ordering.)
-
-```ts
-import { defineApp, lazy, plugin, provide, rename, service, token } from '@arki/dot';
-
-// ── contracts.ts — tokens owned by their respective packages ─────────
-export const Env = token<AppEnv>()('shop.env');
-export const Db = token<DbHandle>()('shop.db');
-export const ReportsDb = Db.instance('reports');
-export const Cache = token<CacheHandle>()('shop.cache');
-export const Bus = token<MessageBus>()('shop.bus');
-
-// ── infrastructure plugins ───────────────────────────────────────────────
-const env = plugin({
-  name: 'env',
-  boot: ({ $config }) => provide(Env, parseEnv($config)),
-});
-
-const telemetry = plugin({
-  name: 'telemetry',
-  needs: { env: Env },
-  boot: ({ env }) => ({ metrics: makeMetrics(env.OTEL_ENDPOINT) }),
-  dispose: ({ metrics }) => metrics.flush(),
-});
-
-const database = (url: string) =>
-  plugin({
-    name: 'database',
-    needs: { metrics: service<Metrics>() },
-    async boot({ metrics }) {
-      return provide(Db, await connectPg(url, { metrics }));
-    },
-    async dispose(ctx) {
-      await ctx[Db.key].end();       // own provide, published under the token key
-    },
-  });
-
-const cache = plugin({
-  name: 'cache',
-  needs: { env: Env },
-  boot: ({ env }) => provide(Cache, connectRedis(env.REDIS_URL)),
-  dispose: async ctx => ctx[Cache.key].quit(),
-});
-
-const searchCluster = plugin({
-  name: 'search-cluster',
-  needs: { env: Env },
-  boot: ({ env }) => ({
-    // Expensive external cluster — only opens if something get()s it.
-    search: lazy(() => connectElastic(env.ELASTIC_URL), {
-      dispose: client => client.close(),
-    }),
-  }),
-});
-
-const bus = plugin({
-  name: 'bus',
-  boot: () => provide(Bus, makeInMemoryBus()),
-});
-
-// ── domain plugins ───────────────────────────────────────────────────────
-const catalog = plugin({
-  name: 'catalog',
-  needs: {
-    db: Db,
-    cache: Cache,
-    search: service.lazy<SearchClient>(),   // eager or lazy provider — same code
-  },
-  boot: ({ db, cache, search }) => ({
-    catalog: makeCatalog({ db, cache, search }),
-  }),
-});
-
-const checkout = plugin({
-  name: 'checkout',
-  needs: { db: Db, bus: Bus, catalog: service<Catalog>() },
-  boot: ({ db, bus, catalog }) => ({
-    checkout: makeCheckout({ db, bus, catalog }),
-  }),
-});
-
-const reporting = plugin({
-  name: 'reporting',
-  needs: { replica: ReportsDb, catalog: service<Catalog>() },
-  boot: ({ replica, catalog }) => ({ reporting: makeReporting(replica, catalog) }),
-});
-
-// ── process plugins — real work happens in start/stop ───────────────────
-const outboxWorker = plugin({
-  name: 'outbox-worker',
-  needs: { db: Db, bus: Bus },
-  boot: ({ db, bus }) => ({ outbox: makeOutbox(db, bus) }),
-  start: ({ outbox }) => outbox.startPolling(),
-  stop: ({ outbox }) => outbox.drain(),      // stop processing, keep resources
-});
-
-const http = plugin({
-  name: 'http',
-  needs: {
-    env: Env,
-    catalog: service<Catalog>(),
-    checkout: service<Checkout>(),
-    reporting: service<Reporting>(),
-  },
-  async boot({ env, catalog, checkout, reporting }) {
-    return { server: buildServer({ port: env.PORT, catalog, checkout, reporting }) };
-  },
-  start: ({ server }) => server.listen(),
-  stop: ({ server }) => server.close(),
-});
-
-// ── composition — the order IS the architecture ──────────────────────
-const app = await defineApp('shop', { config: process.env })
-  .use(env)
-  .use(telemetry)
-  .use(database(PRIMARY_URL))
-  .use(rename(database(REPLICA_URL), { 'shop.db': ReportsDb.key }, 'reports-db'))
-  .use(cache)
-  .use(searchCluster)
-  .use(bus)
-  .use(catalog)
-  .use(checkout)
-  .use(reporting)
-  .use(outboxWorker)
-  .use(http)
-  .start();
-
-// SIGTERM → dispose() cascades stop() first, tears down in exact reverse:
-// http, outbox (drained), reporting, checkout, catalog, bus,
-// search cluster (only if it ever initialized), cache, reports-db,
-// primary db, telemetry, env.
-process.on('SIGTERM', () => void app.dispose());
-```
-
-What the type checker is holding for you in that chain:
-
-- move `.use(catalog)` above `.use(cache)` → compile error at that line;
-- delete `.use(bus)` → compile errors at `checkout` and `outboxWorker`;
-- mount the second `database(...)` without `rename` → collision error;
-- change `makeCatalog` to return something that isn't a `Catalog` →
-  every consumer's `.use()` flags the mismatch.
-
-Concurrent lifecycle calls are safe: transitions are serialized on one
-queue, same-phase calls coalesce onto one in-flight promise, and a
-`dispose()` racing a slow `start()` always runs after it — the app ends
-`disposed`, never resurrected.
-
-## Logging
-
-Dot logs through [`@arki/log`](../log). The kernel's own records go to the
-`arki:dot:lifecycle` category. Importing Dot switches nothing on: the app
-does, with `log()` from `@arki/dot/log` as its **first** `.use(...)`.
-
-```ts
-import { defineApp } from '@arki/dot';
-import { log } from '@arki/dot/log';
-import { asyncContext, fromEnv, stdout } from '@arki/log/node';
-
-const app = await defineApp('checkout')
-  .use(log(() => ({ ...fromEnv(), context: asyncContext(), channels: { stdout: stdout() }, default: { level: 'info', channels: ['stdout'] } })))
-  .boot();
-```
-
-- The config is a thunk. It runs when the app boots, never at import.
-- `resource['service.name']` defaults to the app name.
-- The `configure()` handle is published as the `logging` service
-  (`needs: { logging: service<Configured<'stdout'>>() }`).
-- `log()` reads no env on its own (spread `fromEnv()`), installs no
-  OpenTelemetry SDK and does not patch `console`.
-
-`log()` fills Dot's **logging slot**. Any plugin can fill it with
-`plugin({ name, logging: ({ appName }) => handle })`, where `handle` has
-`close(): Promise<void>`. The kernel calls the factory before its first
-lifecycle record (`configure: starting`) and closes the handle after its
-last one (`dispose: complete`). On a failed `configure`, `boot` or `start`,
-the failure is written first and logging closes last. An app has at most one
-logging plugin: two is `DOT_LIFECYCLE_E018`.
-
-Without a logging plugin, `@arki/log` keeps only the first 64 records at
-`warn` and above, and writes nothing else.
-
-## Testing plugins
-
-`testPlugin` is the typed unit-test builder: satisfy a plugin's needs directly
-with fakes — no real providers, no dependency chain — and the compiler
-holds the same line it holds in production. A missing fake means `boot()`
-does not compile; a fake of the wrong shape fails at the `.provide()`
-call site:
-
-```ts
-import { testPlugin } from '@arki/dot/test-harness';
-
-const app = await testPlugin(catalog)
-  .provide(Db, fakeDb)             // token need
-  .provide('cache', fakeKv)        // anonymous need — wire key is the alias
-  .boot();
-
-expect(app.services.catalog.list()).toEqual([]);
-await app.dispose();
-```
-
-The fakes are published by a synthetic first plugin, so lifecycle semantics
-are the real kernel's — reverse-order teardown, lazy auto-dispose, and
-`$config` all behave exactly as in production. `service.lazy<T>()` needs
-accept a plain `T` fake (lifted automatically) or `lazyOf(value)`.
-
-For integration tests across several real plugins, `testApp([...plugins])`
-builds an app from an erased plugin array (runtime validation only), and
-`bootTestApp` is the one-line boot-and-return variant.
-
-## Operations
-
-Two kernel helpers close the gap between "boots on my machine" and "runs
-under a process manager":
-
-```ts
-const app = await defineApp('shop', { hookTimeoutMs: 30_000 })
-  .use(/* ... */)
-  .start();
-
-hookSignals(app); // SIGTERM/SIGINT → stop() + dispose() → re-raise
-```
-
-- **`hookSignals(app, { timeoutMs? })`** — graceful shutdown wiring. The
-  first signal drains the app (bounded by `timeoutMs`, default 10 s) and
-  re-raises itself so the exit status keeps standard signal semantics; a
-  second signal falls through to the runtime default (immediate kill).
-  Returns an unhook function.
-- **`hookTimeoutMs`** — a per-hook watchdog. Any `boot`/`start`/`stop`/
-  `dispose` hook exceeding the budget fails with `DOT_LIFECYCLE_E015`
-  naming the plugin and hook, and the kernel applies its normal rollback or
-  aggregation rules. Your app cannot hang silently at boot.
-
-## Plugin authoring
-
-`plugin(config)` accepts a `needs` shape plus five lifecycle hooks. Hook
-contexts carry the needed services (typed, under your local aliases) and
-`$`-prefixed kernel keys (`$app`, `$plugin`, `$config`):
-
-| Hook        | Purpose                                                             |
-| ----------- | ------------------------------------------------------------------- |
-| `configure` | Validate static config; declare schemas, routes, services. No I/O.  |
-| `boot`      | Open connections; the returned record is what the plugin provides.     |
-| `start`     | Begin processing (workers, subscribers, schedulers).                |
-| `stop`      | Stop processing in reverse declaration order.                       |
-| `dispose`   | Free resources after `stop`; lazy handles auto-clean afterwards.    |
-
-Wiring is compile-time checked: `.use(plugin)` fails to typecheck when the
-plugin's needs aren't satisfied by earlier `.use()` calls, or when its
-provides collide with an existing wire key. `rename(plugin, { db: 'reportsDb' })`
-mounts a second instance of an adapter without collision; `token<T>()('key')`
-shares a service contract across packages; `lazy(() => open(), { dispose })`
-defers an expensive open until first `get()` — never-touched services never
-initialize, and the kernel auto-disposes initialized ones. Declaration
-order is boot order — same input, same order, every time.
-
-## Lifecycle
-
-`defineApp(name)` returns a builder. Calling `.use(plugin)` accumulates
-plugins. The lifecycle then flows:
-
-```text
-defined ──configure()──▶ configured ──boot()──▶ booted ──start()──▶ started
-                                                                       │
-                       disposed ◀──dispose()── stopped ◀──stop()───────┘
-```
-
-`boot()` runs `configure()` implicitly if you skipped it. `start()` runs
-`boot()` implicitly. `stop()` and `dispose()` always run in reverse
-declaration order, even when an earlier hook failed — failure isolation is
-part of the contract. A boot failure rolls back every already-booted plugin
-before throwing.
-
-Runtime failures carry stable codes (`DotLifecycleError.code`):
-
-| Code                 | Meaning                                              |
-| -------------------- | ---------------------------------------------------- |
-| `DOT_LIFECYCLE_E011` | Plugin registered twice.                                |
-| `DOT_LIFECYCLE_E012` | A need has no provider among earlier plugins.           |
-| `DOT_LIFECYCLE_E013` | A published wire key collides with an earlier one.   |
-| `DOT_LIFECYCLE_E014` | A service key uses the reserved `$` (kernel) prefix. |
-| `DOT_LIFECYCLE_E015` | A hook exceeded the `hookTimeoutMs` watchdog.        |
-
-(Full table including hook-failure codes: [docs/lifecycle.md](./docs/lifecycle.md).)
-
-## CLI
-
-`@arki/dot` ships a small CLI for scaffolding and inspecting apps:
-
-```bash
-# Scaffold a full-stack app: TanStack Start + oRPC + Postgres (@arki/db)
-# + @arki/journal + @arki/ui, with Dockerfile, migrations and tests.
-dot new my-app
-
-# Scaffold the smallest DOT app instead (defineApp + env, vitest boot test).
-dot new my-app --template minimal
-
-# Preview the file operations without writing anything.
-dot new my-app --dry-run --json | jq '.operations'
-
-# Print the app manifest as a structured envelope.
-dot explain --app ./my-app.ts
-
-# Run boot-time diagnostics; non-zero exit if any check fails.
-dot doctor --app ./my-app.ts
-
-# Render the plugin graph as Mermaid flowchart source. explain shows
-# declaration (= boot) order; doctor boots and shows the OBSERVED wiring.
-dot doctor --app ./my-app.ts --graph
-
-# Every command supports --json for agent-friendly output.
-dot explain --app ./my-app.ts --json | jq '.data.plugins'
-```
-
-The CLI emits the same envelope shape as the in-process diagnostics snapshot
-(`app.diagnostics`), so the same downstream tools can consume either. The
-manifest's dependency edges are **observed, not declared** — the kernel
-records which plugin's published service satisfied which need during boot.
-
-### `dot new <app-name>`
-
-Scaffolds an app under `<app-name>/` (override with `--target`). Pick the
-starting point with `--template`:
-
-- **`stack`** (default) — a full-stack app in one package: TanStack Start
-  (React, Vite, Nitro), an oRPC API at `/api/rpc`, Postgres through
-  `@arki/db`, every write through an `@arki/journal` command (an audit
-  trail), all composed with `defineApp`. UI uses `@arki/ui` with the
-  workbench design system. It ships one feature end to end (`notes`), an
-  initial migration, `/api/health`, a `docker-compose.yml` for local
-  Postgres, a production `Dockerfile`, tests on in-memory PGlite (no
-  Docker), and a README + AGENTS.md. Run it with `bun install`,
-  `cp .env.example .env`, `docker compose up -d`, `bun run dev`.
-- **`minimal`** — a `defineApp(...)` entrypoint wired to `@arki/env/dot`,
-  a vitest that boots the app and asserts the manifest shape, and an
-  `AGENTS.md` documenting verification commands.
-
-An unknown template name fails with `DOT_CLI_E005`. Pass `--dry-run --json`
-to inspect the exact file operations (path, action, contentHash,
-contentBytes, reason) before committing them to disk; `--force`
-overwrites pre-existing files in the target directory.
-
-Templates live in [`templates/`](./templates) and ship with the published
-tarball. Generated apps depend only on published `@arki/*` packages.
-
-## Architecture
-
-`@arki/dot` is intentionally small: it defines the contracts (plugin shape,
-lifecycle hooks, manifest schema, diagnostics envelope) and runs them. Adapters
-that bridge databases, queues, auth providers, and HTTP routers live in their
-own packages and consume `@arki/dot` as a peer dependency:
-
-```ts
-import { env } from '@arki/env/dot';
-import { db } from '@arki/db/dot';
-import { kv } from '@arki/kv/dot';
-import { journal } from '@arki/journal/dot';
-```
-
-This keeps the kernel free of optional dependencies and lets each adapter
-ship at its own cadence.
+A refusal is the declared `ORPCError` here, an error envelope on HTTP, a job
+outcome on the queue. `logHandlers()` and `reportErrors({ report })` in
+`defineApp(name, { observers })` watch every handler Dot mounts. Read
+[Steps and arounds](./docs/middleware.md).
+
+## Failure behaviour
+
+Every managed phase returns typed `@arki/failure` values. Check `isFailure(builder.configure())` before reading the manifest, and inspect awaited boot, start, stop and dispose outcomes. Concrete callback refusals remain inferred; unknown exceptions become canonical `UnexpectedDefect` values. Static declaration helpers can still throw outside a managed boundary. See [Upgrade typed phases](./docs/upgrade-phases.md) for the breaking changes and exact phase outcomes.
+
+Legacy `ARKI_DOT_E*` IDs remain diagnostic metadata, not top-level failure codes. Kernel-generated defects retain their `DotLifecycleError` (phase, unit and original cause) inside `UnexpectedDefect.cause`. Owned provider/boot task defects retain the original private cause; diagnostics record phase, owner and legacy ID with safe remediation and docs links. Codes are never renumbered or reused (E009 and E010 are retired). `FeatureError` (E022–E031, E034–E035) and `DotManifestError` (E032) can still escape unmanaged static declarations; CLI module loading supervises them.
+
+The legacy rows below describe diagnostic IDs and their private cause classes. Match returned failures by their canonical definition; inspect legacy IDs locally in the private cause or in diagnostics.
+
+| Code                         | Class               | Meaning                                                                                       | Fix                                                    |
+| ---------------------------- | ------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `dot.action_not_exposed` | Failure value | The adapter is not exposed by the action. | Use a declared binding. |
+| `dot.action_principal_required` | Failure value | No authenticated principal attestation. | Authenticate credentials and expiry at the adapter. |
+| `dot.action_approval_required` | Failure value | No invocation approval attestation. | Verify caller, action and input approval at the adapter. |
+| `dot.env_vault_write_unconfirmed` | Failure value | A 1Password create or edit was attempted without a confirmed result. | Read the provider item before retrying; a repeated push rereads the vault and accepts a matching key. |
+| `dot.preflight_failed`       | Failure value       | Managed preflight failed; `.error.data` contains `app`, `migrations`, `report` and `failure`. | Fix the reported lifecycle failure; exit code is 3.    |
+| `dot.lazy_closed`            | Failure value       | A lazy handle is used after its owner closed.                                                 | Obtain a handle from a live owner.                     |
+| `dot.runtime_replaced`       | Failure value       | HMR replaced this runtime.                                                                    | Use the current module.                                |
+| `dot.runtime_release_failed` | Failure value       | Previous ownership was not safely released.                                                   | Resolve disposal before starting another owner.        |
+| `ARKI_DOT_E001`              | `DotLifecycleError` | `configure` returned a Promise.                                                               | Make `configure` synchronous; do async work in `boot`. |
+| `ARKI_DOT_E002`              | `DotLifecycleError` | `configure` threw.                                                                            | Fix the unit's config or its `configure` hook.       |
+| `ARKI_DOT_E003`              | `DotLifecycleError` | `boot` threw. Booted units were rolled back.                                                | Read `unit` and `cause`; fix that `boot` hook.       |
+| `ARKI_DOT_E004`              | `DotLifecycleError` | `start` threw.                                                                                | Read `unit` and `cause`; fix that `start` hook.      |
+| `ARKI_DOT_E005`              | `DotLifecycleError` | One or more `stop` hooks threw.                                                               | Read `failures`; each names the unit.                |
+| `ARKI_DOT_E006`              | `DotLifecycleError` | One or more `dispose` hooks threw.                                                            | Read `failures`; each names the unit.                |
+| `ARKI_DOT_E007`              | `DotLifecycleError` | The app was reused after `dispose()`.                                                         | Build a fresh app instance.                            |
+| `ARKI_DOT_E008`              | `DotLifecycleError` | The app was reused after a failed lifecycle.                                                  | Build a fresh app instance.                            |
+| `ARKI_DOT_E011`              | `DotLifecycleError` | A unit was registered twice.                                                                | Remove the second mount, or `rename` it.            |
+| `ARKI_DOT_E012`              | `DotLifecycleError` | A need no unit provides (erased or JS graphs).                                              | Mount the provider before its consumer.                |
+| `ARKI_DOT_E013`              | `DotLifecycleError` | A wire key is provided twice.                                                                 | `rename` one provider.                                 |
+| `ARKI_DOT_E014`              | `DotLifecycleError` | A key uses the reserved `$` prefix.                                                           | Rename the key.                                        |
+| `ARKI_DOT_E015`              | `DotLifecycleError` | A hook ran past `hookTimeoutMs`.                                                              | Pass `$signal` to the hook's I/O, or raise the budget. |
+| `ARKI_DOT_E016`              | `DotLifecycleError` | Two actions in one binding share an id.                                                       | Give each action its own id.                           |
+| `ARKI_DOT_E017`              | `DotLifecycleError` | Action `meta` is not plain JSON.                                                              | Keep `meta` JSON-safe.                                 |
+| `ARKI_DOT_E018`              | `DotLifecycleError` | More than one logging unit.                                                                 | Keep one `log()`.                                      |
+| `ARKI_DOT_E019`              | `DotLifecycleError` | Needs and provides form a ring.                                                               | Move the shared piece into a third unit.               |
+| `ARKI_DOT_E020`              | `DotLifecycleError` | A provider is mounted after its consumer.                                                     | Mount the provider first.                              |
+| `ARKI_DOT_E021`              | `DotLifecycleError` | `$describeAction` named an action the unit may not amend.                                   | Describe only your own actions.                        |
+| `ARKI_DOT_E022`              | `FeatureError`      | Two routers use the same key.                                                                 | Rename one key.                                        |
+| `ARKI_DOT_E023`              | `FeatureError`      | Two repos use the same key.                                                                   | Rename one key.                                        |
+| `ARKI_DOT_E024`              | `FeatureError`      | Two slices use the same key.                                                                  | Rename one key.                                        |
+| `ARKI_DOT_E025`              | `FeatureError`      | A feature has no slices.                                                                      | Add at least one slice.                                |
+| `ARKI_DOT_E026`              | `FeatureError`      | A handle is missing from the services bag.                                                    | Mount the provider; check the gateway's needs.         |
+| `ARKI_DOT_E027`              | `FeatureError`      | A feature key collides with another slot or a reserved name.                                  | Rename the alias or key.                               |
+| `ARKI_DOT_E028`              | `FeatureError`      | `override()` named a key no infra unit provides.                                            | Override a key the feature's infra provides.           |
+| `ARKI_DOT_E029`              | `FeatureError`      | `routerFor()`: an app-contract key has zero or several owners.                                | Give each key exactly one feature.                     |
+| `ARKI_DOT_E030`              | `FeatureError`      | `routerFor()`: a feature's contract is not mounted in the app contract.                       | Mount it in the app contract.                          |
+| `ARKI_DOT_E031`              | `FeatureError`      | `rpc()`: a procedure's contract `meta` is not plain JSON.                                     | Keep contract `meta` JSON-safe.                        |
+| `ARKI_DOT_E032`              | `DotManifestError`  | Manifest data is not plain JSON.                                                              | Pass plain JSON only.                                  |
+| `ARKI_DOT_E033`              | `DotLifecycleError` | A unit is mounted on the wrong side (an entrypoint in `.infra()`, or an infra or feature unit in `.entrypoints()`). | Mount infra with `.infra(...)`, entrypoints with `.entrypoints(...)`. |
+| `ARKI_DOT_E034`              | `FeatureError`      | A feature needs `domainService(fn)` its parent does not declare above `.features()`, or it is top-level. | Declare `fn` in the parent's `.domainServices()`; need it from a child only. |
+| `ARKI_DOT_E035`              | `FeatureError`      | `.domainServices()` ran twice, or after `.features()`, `.usecases()` or `.provides()`.     | Call it once, right after `.infra()`.                  |
+
+The `dot` command returns `dot.*` failure codes (`dot.app_not_found`, `dot.doctor_failed`, ...) in the `arki.cli/1` envelope; see the [agent guide](./docs/agent-guide.md#errors) and [The `dot` command](./docs/cli.md). Exit codes: `0` ok, `1` bug, `2` usage, `3` a returned failure.
+
+## Limits
+
+- **`configure` is synchronous.** A `configure` that returns a Promise fails
+  with `ARKI_DOT_E001`, even when the Promise is already resolved. Do async
+  work in `boot` or in a `provides` factory.
+- **Declaration order is boot order.** Nothing sorts the units for you.
+  `.infra(orders, database)`, where `orders` needs `database`, is a compile
+  error. With the types erased (plain JavaScript, or Bun running a file
+  without a type check) it is `ARKI_DOT_E020` at `configure`. The
+  [Quickstart](./docs/quickstart.md) shows both.
+- **One copy of each unit.** `.infra(cache, cache)` is `ARKI_DOT_E011`.
+  A second copy needs `rename`.
+- **One logging unit per app.** A second one is `ARKI_DOT_E018`.
+- **No hook watchdog by default.** A hook that never settles hangs the app
+  until you pass `hookTimeoutMs`. With it, the slow hook fails with
+  `ARKI_DOT_E015`.
+- **`dot doctor` never calls `start`.** Workers and servers that begin in
+  `start` are not checked by it. Test them in your app's tests.
+- **Lists are checked up to 1024 units.** An `.infra()`, `.features()` or `.entrypoints()` list
+  with more entries is a compile error.
+- **Manifest data is plain JSON.** Functions, `Date`s, `Map`s and cycles in
+  action or contract `meta` fail with `ARKI_DOT_E017`, `ARKI_DOT_E031` or
+  `ARKI_DOT_E032`.
 
 ## Documentation
 
-The full docs live in [`docs/`](./docs):
+Start with [Principles](./docs/principles.md): five rules every API and error
+is measured against. Then pick the page for your task. The full index is
+[docs/README.md](./docs/README.md).
 
-- [Principles](./docs/principles.md) — **read first.** The five rules every
-  API, error, and PR is measured against. Slightly playful, very precise.
-- [Quickstart](./docs/quickstart.md) — boot your first app in five minutes.
-- [Plugin authoring](./docs/plugin-authoring.md) — write your own plugin.
-- [Lifecycle](./docs/lifecycle.md) — the 5-hook contract, idempotency, error codes.
-- [Diagnostics](./docs/diagnostics.md) — `app.manifest`, `app.diagnostics`,
-  `dot explain`, `dot doctor`.
-- [Adapter authoring](./docs/adapter-authoring.md) — expose your package as
-  a DOT plugin.
-- [Agent guide](./docs/agent-guide.md) — how coding agents inspect, modify,
-  and verify DOT apps.
-- [Release policy](./docs/release-policy.md) — SemVer and deprecation.
+| Page                                                   | Read it to                                                          |
+| ------------------------------------------------------ | ------------------------------------------------------------------- |
+| [Quickstart](./docs/quickstart.md)                     | build an app, break it, and read the error.                         |
+| [Dependency injection](./docs/di.md)                   | wire needs and provides, tokens, `rename`, lazy services, features. |
+| [Steps and arounds](./docs/middleware.md)              | wrap a handler once (auth, a transaction) for every transport.      |
+| [A complex setup](./docs/complex-setup.md)             | see a many-unit app and the order it boots in.                    |
+| [Testing units](./docs/testing.md)                   | test a unit against fakes, or several units together.           |
+| [Logging, shutdown and timeouts](./docs/operations.md) | run an app under a process manager.                                 |
+| [The `dot` command](./docs/cli.md)                     | use `dot new`, `dot explain`, `dot doctor` and `dot dev`.           |
+| [Unit authoring](./docs/unit-authoring.md)         | write a unit.                                                     |
+| [Lifecycle](./docs/lifecycle.md)                       | learn the five hooks and their failure rules.                       |
+| [Diagnostics](./docs/diagnostics.md)                   | read `app.manifest` and `app.diagnostics`.                          |
+| [Observability](./docs/observability.md)               | export traces and metrics with OpenTelemetry.                       |
+| [Adapter authoring](./docs/adapter-authoring.md)       | expose your package as a `./dot` unit.                            |
+| [Deploy an app](./docs/recipes/deploy.md)              | ship a generated app in a container.                                |
+| [Upgrade typed phases](./docs/upgrade-phases.md)       | handle inferred phase failures and supervised usecases.             |
+| [Upgrade Dot](./docs/recipes/upgrade.md)               | move to a new version and check the app still boots.                |
+| [Agent guide](./docs/agent-guide.md)                   | let a coding agent inspect and change an app.                       |
 
-Agent-discoverable index: [`llms.txt`](./llms.txt).
+Agents start at [`llms.txt`](./llms.txt).
 
 <!-- bench:start -->
+
 ## Benchmarks
 
-A 20-service graph where each service depends on the two before it, built with `@arki/dot` plugins and with awilix, the most used dependency-injection container for Node. A hand-wired version is the floor: no container at all.
+A 20-service graph where each service depends on the two before it, built with `@arki/dot` units and with awilix, the most used dependency-injection container for Node. A hand-wired version is the floor: no container at all.
 
 Node v22.13.1 on Apple M2 Max, 2026-10-13. Median time per operation, lower is better.
 
 ### Build the graph and bring it up (boot + dispose, 20 services)
 
-dot: declare 20 plugins, boot, dispose. awilix: create a container, register 20 factories, resolve all 20, dispose. Hand-wired: build the 20 objects in order.
+dot: declare 20 units, boot, dispose. awilix: create a container, register 20 factories, resolve all 20, dispose. Hand-wired: build the 20 objects in order.
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/dot (boot + dispose) | 199.83 µs | 14.99× |
-| awilix (register + resolve + dispose) | 65.92 µs | 4.94× |
-| hand-written wiring (no container) | 13.33 µs | fastest |
+| Library                               | Time / op | vs fastest |
+| ------------------------------------- | --------: | ---------: |
+| @arki/dot (boot + dispose)            | 199.83 µs |     14.99× |
+| awilix (register + resolve + dispose) |  65.92 µs |      4.94× |
+| hand-written wiring (no container)    |  13.33 µs |    fastest |
 
 ### Look up a service after boot
 
 The hot path: code that already has a booted app asks for one service. dot services are plain properties; awilix `resolve` and `cradle` go through a cache lookup.
 
-| Library | Time / op | vs fastest |
-| --- | ---: | ---: |
-| @arki/dot (app.services.s19) | 30.3 ns | fastest |
-| awilix (container.resolve('s19')) | 67.2 ns | 2.21× |
-| awilix (container.cradle.s19) | 105.4 ns | 3.47× |
-| hand-written (plain object property) | 32.0 ns | 1.05× |
+| Library                              | Time / op | vs fastest |
+| ------------------------------------ | --------: | ---------: |
+| @arki/dot (app.services.s19)         |   30.3 ns |    fastest |
+| awilix (container.resolve('s19'))    |   67.2 ns |      2.21× |
+| awilix (container.cradle.s19)        |  105.4 ns |      3.47× |
+| hand-written (plain object property) |   32.0 ns |      1.05× |
 
 Read the rows with the contracts in mind:
 
-- `@arki/dot` and awilix do different jobs. awilix is a container: it registers factories and builds them on first use. dot runs an application lifecycle: it orders plugins by their declared needs, runs `configure`, `boot` and `dispose` hooks in order (and in reverse on shutdown), checks the wiring at compile time, and records a manifest and diagnostics for every plugin.
+- `@arki/dot` and awilix do different jobs. awilix is a container: it registers factories and builds them on first use. dot runs an application lifecycle: it orders units by their declared needs, runs `configure`, `boot` and `dispose` hooks in order (and in reverse on shutdown), checks the wiring at compile time, and records a manifest and diagnostics for every unit.
 - The boot rows therefore measure more work in dot than in awilix. They are shown so you can see what that lifecycle costs, not to say the two are interchangeable.
-- Boot is async in dot (plugin hooks may await). awilix resolves synchronously.
+- Boot is async in dot (unit hooks may await). awilix resolves synchronously.
 
 Reproduce with `bun run bench` in the package directory; regenerate this section with `bun run bench --write-readme`.
 <!-- bench:end -->
 
+## Support
+
+Report bugs and ask questions at
+[github.com/arki-labs/arki/issues](https://github.com/arki-labs/arki/issues).
+Include the output of `dot doctor --json` and the `code` of the error you saw.
+Changes are listed in [CHANGELOG.md](./CHANGELOG.md).
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).
+
+Read [Action boundaries](./docs/actions.md) and [Upgrade action boundaries](./docs/upgrade-actions.md).

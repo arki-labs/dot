@@ -1,33 +1,22 @@
-/**
- * Public entry point for the DOT kernel (v2).
- *
- * `defineApp(name)` returns a `DotAppBuilder` that accumulates units in three
- * hexagonal steps, then transitions through the 5-hook lifecycle:
- *
- *   defineApp -> use* -> features? -> serve* -> configure() -> boot() -> start() -> stop() -> dispose()
- *
- * `.use()` is compile-time guarded: a plugin whose `needs` are not satisfied
- * by services provided so far — or whose provides collide with existing
- * wire keys — fails to typecheck at the call site ("Expected 2 arguments,
- * but got 1", with the diagnostic embedded in the expected second
- * argument's type). Declaration order IS boot order.
- *
- * Most callers don't need to call `configure()` explicitly — `boot()` runs it
- * implicitly. `boot()` is also implicit when starting from `defined` via
- * `start()`.
- *
- * See `./lifecycle.ts` for hook semantics, failure ordering, idempotency rules.
- */
-import { bindDriver, plug } from './feature.js';
+import { isFailure, UnexpectedDefect } from '@arki/failure';
+import { DotLifecycleError, DotLifecycleErrorCode } from './lifecycle.js';
+import { allFeatures, mountFeatures } from './define-feature.js';
+import { bindEntrypoint } from './feature.js';
 import { DotAppImpl } from './kernel/app-instance.js';
 import { renderTimeline } from './timeline.js';
+function failed(value) {
+    return isFailure(value);
+}
+function configuredApp(value) {
+    return !isFailure(value);
+}
 /**
  * Create a new DOT app builder.
  *
  * @example
- * const app = await defineApp('my-app')
- *   .use(dbPlugin)
- *   .use(billingPlugin)   // billing's needs must be satisfied by now
+ * const app = await defineApp('pizzeria')
+ *   .infra(database, cache)   // cache's needs must be satisfied by database
+ *   .features([billing])
  *   .boot();
  *
  * await app.start();
@@ -41,75 +30,137 @@ export function defineApp(name, options = {}) {
         appVersion: options.version,
         plugins: [],
         features: [],
+        misplaced: [],
         config: options.config,
         observers: options.observers,
         hookTimeoutMs: options.hookTimeoutMs,
+        clock: options.clock,
     };
     return makeBuilder(state);
 }
 function buildImpl(state) {
+    const [misplaced] = state.misplaced;
+    if (misplaced !== undefined) {
+        throw new DotLifecycleError({
+            code: DotLifecycleErrorCode.UnitOnWrongSide,
+            phase: 'configure',
+            plugin: misplaced.name,
+            message: `Unit "${misplaced.name}" is an ${misplaced.role} unit, mounted with .${misplaced.step}()`,
+        });
+    }
     return new DotAppImpl({
         appName: state.appName,
         appVersion: state.appVersion,
-        plugins: state.plugins.map(unit => ('bind' in unit ? unit.bind(state.features) : unit)),
+        // A unit built by `fromFeatures` takes its binder's role: the binder is the declaration.
+        plugins: state.plugins.map(unit => ('bind' in unit ? { ...unit.bind(state.features), role: unit.role } : unit)),
         config: state.config,
         observers: state.observers,
         hookTimeoutMs: state.hookTimeoutMs,
+        clock: state.clock,
+    });
+}
+function bindAdapter(adapter, features) {
+    // A unit built by `fromFeatures` takes its binder's role, so an `infra.fromFeatures` here is caught as misplaced.
+    return 'bind' in adapter ? { ...bindEntrypoint(adapter, features), role: adapter.role } : onSide(adapter, 'entrypoint');
+}
+/** Give a role-less unit the step's role; a unit built by `infra` / `entrypoint` / `defineFeature` keeps its own. */
+function onSide(unit, role) {
+    return unit.role === undefined ? { ...unit, role } : unit;
+}
+/** Infra steps take infra, feature and domain-service units; entrypoint steps take entrypoints only. */
+function misplacedIn(units, step) {
+    return units.flatMap(unit => {
+        const role = unit.role;
+        if (role === undefined ||
+            role === step.role ||
+            (step.role === 'infra' && (role === 'feature' || role === 'domain-service')))
+            return [];
+        return [{ name: unit.name, role, step: step.name }];
+    });
+}
+function runtimeUnits(units) {
+    return units;
+}
+function featureRuntime(features) {
+    mountFeatures(features);
+    return features.flatMap(f => f.units());
+}
+function drivingRuntime(adapters, features) {
+    return adapters.map(adapter => bindAdapter(adapter, features));
+}
+/** Internal dynamic-list entrypoint; unlike `.infra(...list)`, this does not claim tuple wiring checks. */
+export function mountUnits(name, plugins, options = {}) {
+    return makeBuilder({
+        appName: name,
+        appVersion: options.version,
+        plugins: [...plugins],
+        features: [],
+        misplaced: [],
+        config: options.config,
+        observers: options.observers,
+        hookTimeoutMs: options.hookTimeoutMs,
+        clock: options.clock,
     });
 }
 function makeBuilder(state) {
-    // The `use` implementation is signature-erased (the guard exists purely
-    // at the type level); the single cast below is the same kernel boundary
-    // v1 crossed in its wrapApp helper. The phase split is type-only too:
-    // one runtime object serves every phase.
-    const impl = {
-        features(features, ..._guard) {
-            const nextState = {
-                ...state,
-                plugins: [...state.plugins, ...features.map((f) => ({ ...plug(f), role: 'feature' }))],
-                features: [...state.features, ...features],
-            };
-            return makeBuilder(nextState);
-        },
-        serve(adapter, ..._guard) {
-            const bound = 'bind' in adapter ? bindDriver(adapter, state.features) : adapter;
-            const nextState = {
-                ...state,
-                plugins: [...state.plugins, { ...bound, role: 'driving' }],
-            };
-            return makeBuilder(nextState);
-        },
-        use(plugin, ..._guard) {
-            const nextState = {
-                ...state,
-                plugins: [...state.plugins, plugin],
-            };
-            return makeBuilder(nextState);
-        },
-        useAll(plugins, ..._guard) {
-            const nextState = {
-                ...state,
-                plugins: [...state.plugins, ...plugins],
-            };
-            return makeBuilder(nextState);
-        },
-        configure() {
-            const appImpl = buildImpl(state);
-            appImpl.runConfigure();
-            return wrapConfigured(appImpl);
-        },
-        async boot() {
-            const appImpl = buildImpl(state);
-            await appImpl.boot();
-            return wrapApp(appImpl);
-        },
-        async start() {
-            const appImpl = buildImpl(state);
-            await appImpl.start();
-            return wrapApp(appImpl);
-        },
-    };
-    return impl;
+    return new Builder(state);
+}
+/** One checked implementation supplies both public builder phases. */
+class Builder {
+    #state;
+    constructor(state) {
+        this.#state = state;
+        this.infra = this.infra.bind(this);
+        this.features = this.features.bind(this);
+        this.entrypoints = this.entrypoints.bind(this);
+        this.configure = this.configure.bind(this);
+        this.boot = this.boot.bind(this);
+        this.start = this.start.bind(this);
+    }
+    append(units, features = this.#state.features, step) {
+        return new Builder({
+            ...this.#state,
+            plugins: [...this.#state.plugins, ...(step === undefined ? units : units.map(u => ('bind' in u ? u : onSide(u, step.role))))],
+            features,
+            misplaced: step === undefined ? this.#state.misplaced : [...this.#state.misplaced, ...misplacedIn(units, step)],
+        });
+    }
+    /** Register infrastructure in boot order, before the domain. */
+    infra(...units) {
+        return this.append(runtimeUnits(units), undefined, { name: 'infra', role: 'infra' });
+    }
+    /** Mount the domain; later steps can register only driving adapters. */
+    features(features) {
+        return this.append(featureRuntime(features), [...this.#state.features, ...allFeatures(features)]);
+    }
+    /** Register the app's driving adapters in argument order. */
+    entrypoints(...adapters) {
+        return this.append(drivingRuntime(adapters, this.#state.features), undefined, { name: 'entrypoints', role: 'entrypoint' });
+    }
+    configure() {
+        try {
+            const impl = buildImpl(this.#state);
+            const outcome = impl.runConfigure();
+            if (failed(outcome))
+                return outcome;
+            return wrapConfigured(impl);
+        }
+        catch (error) {
+            return UnexpectedDefect({ cause: error });
+        }
+    }
+    async boot() {
+        const configured = this.configure();
+        if (!configuredApp(configured))
+            return configured;
+        return configured.boot();
+    }
+    async start() {
+        const configured = this.configure();
+        if (!configuredApp(configured))
+            return configured;
+        return configured.start();
+    }
 }
 function wrapApp(impl) {
     return {
@@ -128,7 +179,7 @@ function wrapApp(impl) {
         get diagnostics() {
             return impl.diagnostics;
         },
-        start: () => impl.start(),
+        start: () => impl.startBooted(),
         stop: () => impl.stop(),
         dispose: () => impl.dispose(),
         subscribe: observer => impl.subscribe(observer),
@@ -150,11 +201,15 @@ function wrapConfigured(impl) {
             return impl.diagnostics;
         },
         async boot() {
-            await impl.boot();
+            const result = await impl.bootConfigured();
+            if (failed(result))
+                return result;
             return wrapApp(impl);
         },
         async start() {
-            await impl.start();
+            const result = await impl.startConfigured();
+            if (failed(result))
+                return result;
             return wrapApp(impl);
         },
         subscribe: observer => impl.subscribe(observer),

@@ -1,42 +1,38 @@
-import { hookSignals } from '@arki/dot';
+import { createAppRuntime } from '@arki/dot/runtime';
+import { isFailure } from '@arki/failure';
 
-import { app } from '~/app';
+import { app, dev } from '~/app';
 
 import type { RpcContext } from './orpc';
 
-type StartedApp = Awaited<ReturnType<typeof app.start>>;
+/**
+ * The started DOT app: one per server process. Boot runs migrations, then
+ * the journal worker starts; SIGTERM / SIGINT drain it. A failed start is not
+ * cached, so a database that comes up late does not need a restart.
+ *
+ * `dot dev` sets `DOT_DEV=1` and gets `dev` (embedded PGlite); everything
+ * else runs `app` (Postgres from `DB_URL`). Both come from one `createApp`,
+ * so their services have the same shape. On a hot update the old app is
+ * disposed before the new one starts, so two apps never share the database.
+ */
+const runtime = createAppRuntime(process.env['DOT_DEV'] === '1' ? dev : app, { hot: import.meta.hot });
 
-declare global {
-  // One started app per process. Kept on globalThis so a dev-server reload
-  // reuses it instead of opening a second database pool.
-  var __dotAppStart: Promise<StartedApp> | undefined;
+/** The started app, started on first use, or the failure that kept it from starting. */
+export function startApp() {
+  return runtime.get();
 }
 
 /**
- * Start the DOT app once (boot runs migrations, then the journal worker
- * starts) and return it. A failed start is not cached: the next call tries
- * again, so a database that comes up late does not need a restart.
+ * The oRPC context for one request, or the failure that kept the app from
+ * starting. There is no sign-in yet, so writes have no actor.
  */
-export function startApp(): Promise<StartedApp> {
-  globalThis.__dotAppStart ??= app.start().then(
-    started => {
-      // SIGTERM / SIGINT drain the app: stop the worker, close the pool.
-      hookSignals(started);
-      return started;
-    },
-    (error: unknown) => {
-      globalThis.__dotAppStart = undefined;
-      throw error;
-    },
-  );
-  return globalThis.__dotAppStart;
-}
-
-/** The oRPC context for one request. There is no sign-in yet, so writes have no actor. */
-export async function createRpcContext(): Promise<RpcContext> {
-  const { services } = await startApp();
-  return {
+export async function createRpcContext() {
+  const started = await startApp();
+  if (isFailure(started)) return started;
+  const { services } = started;
+  const context: RpcContext = {
     db: services.db,
     run: services.journal.bind(services.db, { actorId: null }),
   };
+  return context;
 }
