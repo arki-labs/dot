@@ -1,6 +1,6 @@
 {
   "package": "@arki/dot",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "entries": [
     {
       "subpath": ".",
@@ -426,7 +426,7 @@
       "subpath": ".",
       "name": "HookSignalsOptions",
       "kind": "type",
-      "signature": "export type HookSignalsOptions = { /** Signals to intercept. Default: `['SIGTERM', 'SIGINT']`. */ readonly signals?: readonly string[]; /** * Maximum time the drain (`dispose()`) may take before the process is * terminated anyway. Default: 10 000 ms. */ readonly timeoutMs?: number; /** Test seam — a process-like target. Default: the global `process`, when the runtime has one. */ readonly proc?: SignalTarget; };",
+      "signature": "export type HookSignalsOptions = { /** * Signals to intercept. Default: `['SIGTERM', 'SIGINT']`. Only termination signals a * process can catch: `SIGKILL` and `SIGSTOP` cannot be hooked, so the type leaves them out. */ readonly signals?: readonly ('SIGTERM' | 'SIGINT' | 'SIGHUP' | 'SIGQUIT' | 'SIGBREAK' | 'SIGUSR2')[]; /** * Maximum time the drain (`dispose()`) may take before the process is * terminated anyway. Default: 10 000 ms. */ readonly timeoutMs?: number; /** Test seam — a process-like target. Default: the global `process`, when the runtime has one. */ readonly proc?: SignalTarget; };",
       "jsdocSummary": ""
     },
     {
@@ -658,13 +658,13 @@
       "name": "renderTimeline",
       "kind": "function",
       "signature": "export declare function renderTimeline(snapshot: DotDiagnosticsSnapshot, opts?: RenderTimelineOptions): string;",
-      "jsdocSummary": "Render the snapshot's lifecycle records as a per-phase waterfall. Pure — no IO. Caller is responsible for printing the result."
+      "jsdocSummary": "Render the snapshot's lifecycle records as a per-phase waterfall. Pure — no IO. Caller is responsible for printing the result. Throws a `FailureError` (`invariant`) when `barWidth` is not a whole number from 1 to 1000."
     },
     {
       "subpath": ".",
       "name": "RenderTimelineOptions",
       "kind": "type",
-      "signature": "export type RenderTimelineOptions = { /** Maximum bar width in characters (default `50`). */ readonly barWidth?: number; /** * When `true`, also emit any unit's diagnostic `issues[]` underneath * the bar so failure reasons are visible in the timeline view. * Default `true`. */ readonly showIssues?: boolean; };",
+      "signature": "export type RenderTimelineOptions = { /** * Maximum bar width in characters (default `50`): a whole number from 1 to 1000. * Any other value is a caller bug and fails an `invariant`. */ readonly barWidth?: number; /** * When `true`, also emit any unit's diagnostic `issues[]` underneath * the bar so failure reasons are visible in the timeline view. * Default `true`. */ readonly showIssues?: boolean; };",
       "jsdocSummary": ""
     },
     {
@@ -979,28 +979,28 @@
       "subpath": "./cli",
       "name": "AppImportFailed",
       "kind": "variable",
-      "signature": "export declare const AppImportFailed: import(\"@arki/failure\").FailureDefinition<\"dot.app_import_failed\", StandardSchemaV1<AppImportFailedData, AppImportFailedData>>;",
+      "signature": "export declare const AppImportFailed: import(\"@arki/failure\").FailureDefinition<\"dot.app_import_failed\", import(\"@standard-schema/spec\").StandardSchemaV1<Readonly<{ filePath: string; exportName: string | null; causeMessage: string; causeCode: string | null; causeRemediation: string | null; }>, Readonly<{ filePath: string; exportName: string | null; causeMessage: string; causeCode: string | null; causeRemediation: string | null; }>>>;",
       "jsdocSummary": "Importing the app file threw, or its exported factory did."
     },
     {
       "subpath": "./cli",
       "name": "AppInvalidExport",
       "kind": "variable",
-      "signature": "export declare const AppInvalidExport: import(\"@arki/failure\").FailureDefinition<\"dot.app_invalid_export\", StandardSchemaV1<AppInvalidExportData, AppInvalidExportData>>;",
+      "signature": "export declare const AppInvalidExport: import(\"@arki/failure\").FailureDefinition<\"dot.app_invalid_export\", import(\"@standard-schema/spec\").StandardSchemaV1<Readonly<{ filePath: string; exportName: string | null; exports: readonly string[]; matches: readonly string[]; }>, Readonly<{ filePath: string; exportName: string | null; exports: readonly string[]; matches: readonly string[]; }>>>;",
       "jsdocSummary": "The app file loaded, but no export is a DOT app, or several are and none is `default` or `app`."
     },
     {
       "subpath": "./cli",
       "name": "AppLifecycleFailed",
       "kind": "variable",
-      "signature": "export declare const AppLifecycleFailed: import(\"@arki/failure\").FailureDefinition<\"dot.app_lifecycle_failed\", StandardSchemaV1<AppLifecycleFailedData, AppLifecycleFailedData>>;",
+      "signature": "export declare const AppLifecycleFailed: import(\"@arki/failure\").FailureDefinition<\"dot.app_lifecycle_failed\", import(\"@standard-schema/spec\").StandardSchemaV1<Readonly<{ phase: \"boot\" | \"configure\"; underlyingCode: string; causeMessage: string; }>, Readonly<{ phase: \"boot\" | \"configure\"; underlyingCode: string; causeMessage: string; }>>>;",
       "jsdocSummary": "`configure` threw while the CLI prepared the app."
     },
     {
       "subpath": "./cli",
       "name": "AppNotFound",
       "kind": "variable",
-      "signature": "export declare const AppNotFound: import(\"@arki/failure\").FailureDefinition<\"dot.app_not_found\", StandardSchemaV1<AppNotFoundData, AppNotFoundData>>;",
+      "signature": "export declare const AppNotFound: import(\"@arki/failure\").FailureDefinition<\"dot.app_not_found\", import(\"@standard-schema/spec\").StandardSchemaV1<Readonly<{ cwd: string; searched: readonly string[]; }>, Readonly<{ cwd: string; searched: readonly string[]; }>>>;",
       "jsdocSummary": "No app file at the default paths and no `--app`."
     },
     {
@@ -1014,21 +1014,21 @@
       "subpath": "./cli",
       "name": "DevAlreadyRunning",
       "kind": "variable",
-      "signature": "export declare const DevAlreadyRunning: import(\"@arki/failure\").FailureDefinition<\"dot.dev_already_running\", StandardSchemaV1<DevAlreadyRunningData, DevAlreadyRunningData>>;",
+      "signature": "export declare const DevAlreadyRunning: import(\"@arki/failure\").FailureDefinition<\"dot.dev_already_running\", import(\"@standard-schema/spec\").StandardSchemaV1<Readonly<{ pid: number; statePath: string; }>, Readonly<{ pid: number; statePath: string; }>>>;",
       "jsdocSummary": "Another `dot dev` is alive in this project: its pid is in the state file."
     },
     {
       "subpath": "./cli",
       "name": "DevAppStarted",
       "kind": "variable",
-      "signature": "export declare const DevAppStarted: import(\"@arki/failure\").FailureDefinition<\"dot.dev_app_started\", StandardSchemaV1<DevAppStartedData, DevAppStartedData>>;",
+      "signature": "export declare const DevAppStarted: import(\"@arki/failure\").FailureDefinition<\"dot.dev_app_started\", import(\"@standard-schema/spec\").StandardSchemaV1<Readonly<{ filePath: string; exportName: string; }>, Readonly<{ filePath: string; exportName: string; }>>>;",
       "jsdocSummary": "The app export is already configured, booted or started: `dot dev` cannot own its lifecycle."
     },
     {
       "subpath": "./cli",
       "name": "DevDbUnreachable",
       "kind": "variable",
-      "signature": "export declare const DevDbUnreachable: import(\"@arki/failure\").FailureDefinition<\"dot.dev_db_unreachable\", StandardSchemaV1<DevDbUnreachableData, DevDbUnreachableData>>;",
+      "signature": "export declare const DevDbUnreachable: import(\"@arki/failure\").FailureDefinition<\"dot.dev_db_unreachable\", import(\"@standard-schema/spec\").StandardSchemaV1<Readonly<{ target: string; reason: string; }>, Readonly<{ target: string; reason: string; }>>>;",
       "jsdocSummary": "`dot dev` found no Postgres to talk to: no URL, a bad URL, or a closed port it could not start."
     },
     {
@@ -1049,21 +1049,21 @@
       "subpath": "./cli",
       "name": "DevPortInUse",
       "kind": "variable",
-      "signature": "export declare const DevPortInUse: import(\"@arki/failure\").FailureDefinition<\"dot.dev_port_in_use\", StandardSchemaV1<DevPortInUseData, DevPortInUseData>>;",
+      "signature": "export declare const DevPortInUse: import(\"@arki/failure\").FailureDefinition<\"dot.dev_port_in_use\", import(\"@standard-schema/spec\").StandardSchemaV1<Readonly<{ port: number; }>, Readonly<{ port: number; }>>>;",
       "jsdocSummary": "Something already listens on the app port, so the runner would not get it."
     },
     {
       "subpath": "./cli",
       "name": "DevPreflightFailed",
       "kind": "variable",
-      "signature": "export declare const DevPreflightFailed: import(\"@arki/failure\").FailureDefinition<\"dot.dev_preflight_failed\", StandardSchemaV1<DevPreflightFailedData, DevPreflightFailedData>>;",
+      "signature": "export declare const DevPreflightFailed: import(\"@arki/failure\").FailureDefinition<\"dot.dev_preflight_failed\", import(\"@standard-schema/spec\").StandardSchemaV1<Readonly<{ reason: string; exitCode: number | null; output: readonly string[]; }>, Readonly<{ reason: string; exitCode: number | null; output: readonly string[]; }>>>;",
       "jsdocSummary": "The preflight process did not report a result: a crash, a hang past the timeout, or output that is not its report. Never a pass."
     },
     {
       "subpath": "./cli",
       "name": "DevRemoteDbRefused",
       "kind": "variable",
-      "signature": "export declare const DevRemoteDbRefused: import(\"@arki/failure\").FailureDefinition<\"dot.dev_remote_db_refused\", StandardSchemaV1<DevRemoteDbRefusedData, DevRemoteDbRefusedData>>;",
+      "signature": "export declare const DevRemoteDbRefused: import(\"@arki/failure\").FailureDefinition<\"dot.dev_remote_db_refused\", import(\"@standard-schema/spec\").StandardSchemaV1<Readonly<{ target: string; host: string; source: string; }>, Readonly<{ target: string; host: string; source: string; }>>>;",
       "jsdocSummary": "The database is neither on this machine nor a compose service: `dot dev` would migrate it on boot."
     },
     {
@@ -1077,7 +1077,7 @@
       "subpath": "./cli",
       "name": "DevRunnerFailed",
       "kind": "variable",
-      "signature": "export declare const DevRunnerFailed: import(\"@arki/failure\").FailureDefinition<\"dot.dev_runner_failed\", StandardSchemaV1<DevRunnerFailedData, DevRunnerFailedData>>;",
+      "signature": "export declare const DevRunnerFailed: import(\"@arki/failure\").FailureDefinition<\"dot.dev_runner_failed\", import(\"@standard-schema/spec\").StandardSchemaV1<Readonly<{ command: string; causeMessage: string; }>, Readonly<{ command: string; causeMessage: string; }>>>;",
       "jsdocSummary": "The app runner (`vite dev`, `--run`, or `dot _serve`) could not be started."
     },
     {
@@ -1086,6 +1086,13 @@
       "kind": "type",
       "signature": "export type DevState = z.infer<typeof devStateZod>;",
       "jsdocSummary": "The content of `dev.json`."
+    },
+    {
+      "subpath": "./cli",
+      "name": "DevStateFailed",
+      "kind": "variable",
+      "signature": "export declare const DevStateFailed: import(\"@arki/failure\").FailureDefinition<\"dot.dev_state_failed\", import(\"@standard-schema/spec\").StandardSchemaV1<Readonly<{ statePath: string; reason: string; }>, Readonly<{ statePath: string; reason: string; }>>>;",
+      "jsdocSummary": "`dot dev` could not create its state file: the project folder is read-only or full."
     },
     {
       "subpath": "./cli",
@@ -1098,7 +1105,7 @@
       "subpath": "./cli",
       "name": "DoctorFailed",
       "kind": "variable",
-      "signature": "export declare const DoctorFailed: import(\"@arki/failure\").FailureDefinition<\"dot.doctor_failed\", StandardSchemaV1<DoctorReport, DoctorReport>>;",
+      "signature": "export declare const DoctorFailed: import(\"@arki/failure\").FailureDefinition<\"dot.doctor_failed\", import(\"@standard-schema/spec\").StandardSchemaV1<{ snapshotVersion: 2; generatedAt: string; app: { name: string; state: \"booted\" | \"configured\" | \"defined\" | \"disposed\" | \"failed\" | \"started\" | \"stopped\"; }; plugins: { plugin: string; status: \"degraded\" | \"failed\" | \"ok\" | \"skipped\"; issues: { code: string; severity: \"error\" | \"info\" | \"warning\"; plugin?: string | undefined; message: string; remediation: string; docsUrl: string; metadata?: Record<string, unknown> | undefined; }[]; }[]; actions: { id: string; plugin: string; binding: string; summary?: string | undefined; status: \"degraded\" | \"failed\" | \"ok\"; issues: { code: string; severity: \"error\" | \"info\" | \"warning\"; plugin?: string | undefined; message: string; remediation: string; docsUrl: string; metadata?: Record<string, unknown> | undefined; }[]; }[]; services: { service: string; plugin: string; status: \"degraded\" | \"failed\" | \"missing\" | \"ok\"; issues: { code: string; severity: \"error\" | \"info\" | \"warning\"; plugin?: string | undefined; message: string; remediation: string; docsUrl: string; metadata?: Record<string, unknown> | undefined; }[]; }[]; lifecycle: { plugin: string; hook: \"boot\" | \"configure\" | \"dispose\" | \"start\" | \"stop\"; state: \"booted\" | \"configured\" | \"defined\" | \"disposed\" | \"failed\" | \"started\" | \"stopped\"; order: number; durationMs?: number | undefined; issues: { code: string; severity: \"error\" | \"info\" | \"warning\"; plugin?: string | undefined; message: string; remediation: string; docsUrl: string; metadata?: Record<string, unknown> | undefined; }[]; }[]; issues: { code: string; severity: \"error\" | \"info\" | \"warning\"; plugin?: string | undefined; message: string; remediation: string; docsUrl: string; metadata?: Record<string, unknown> | undefined; }[]; status: \"failure\" | \"success\" | \"warning\"; }, { snapshotVersion: 2; generatedAt: string; app: { name: string; state: \"booted\" | \"configured\" | \"defined\" | \"disposed\" | \"failed\" | \"started\" | \"stopped\"; }; plugins: { plugin: string; status: \"degraded\" | \"failed\" | \"ok\" | \"skipped\"; issues: { code: string; severity: \"error\" | \"info\" | \"warning\"; plugin?: string | undefined; message: string; remediation: string; docsUrl: string; metadata?: Record<string, unknown> | undefined; }[]; }[]; actions: { id: string; plugin: string; binding: string; summary?: string | undefined; status: \"degraded\" | \"failed\" | \"ok\"; issues: { code: string; severity: \"error\" | \"info\" | \"warning\"; plugin?: string | undefined; message: string; remediation: string; docsUrl: string; metadata?: Record<string, unknown> | undefined; }[]; }[]; services: { service: string; plugin: string; status: \"degraded\" | \"failed\" | \"missing\" | \"ok\"; issues: { code: string; severity: \"error\" | \"info\" | \"warning\"; plugin?: string | undefined; message: string; remediation: string; docsUrl: string; metadata?: Record<string, unknown> | undefined; }[]; }[]; lifecycle: { plugin: string; hook: \"boot\" | \"configure\" | \"dispose\" | \"start\" | \"stop\"; state: \"booted\" | \"configured\" | \"defined\" | \"disposed\" | \"failed\" | \"started\" | \"stopped\"; order: number; durationMs?: number | undefined; issues: { code: string; severity: \"error\" | \"info\" | \"warning\"; plugin?: string | undefined; message: string; remediation: string; docsUrl: string; metadata?: Record<string, unknown> | undefined; }[]; }[]; issues: { code: string; severity: \"error\" | \"info\" | \"warning\"; plugin?: string | undefined; message: string; remediation: string; docsUrl: string; metadata?: Record<string, unknown> | undefined; }[]; status: \"failure\" | \"success\" | \"warning\"; }>>;",
       "jsdocSummary": "`doctor` found error-severity issues. The data is the whole report: `.error.data.plugins[]`."
     },
     {
@@ -1259,7 +1266,7 @@
       "subpath": "./cli",
       "name": "PreflightFailed",
       "kind": "variable",
-      "signature": "export declare const PreflightFailed: import(\"@arki/failure\").FailureDefinition<\"dot.preflight_failed\", StandardSchemaV1<{ app: { file: string; exportName: string; plugins: number; features: number; } | null; migrations: string[] | null; report: { [x: string]: unknown; status: \"failure\" | \"success\" | \"warning\"; plugins: { [x: string]: unknown; issues: { [x: string]: unknown; code: string; }[]; }[]; actions: { [x: string]: unknown; issues: { [x: string]: unknown; code: string; }[]; }[]; services: { [x: string]: unknown; issues: { [x: string]: unknown; code: string; }[]; }[]; lifecycle: { [x: string]: unknown; issues: { [x: string]: unknown; code: string; }[]; }[]; issues: { [x: string]: unknown; code: string; }[]; } | null; failure: { code: string; message: string; data: unknown; } | null; }, { app: { file: string; exportName: string; plugins: number; features: number; } | null; migrations: string[] | null; report: { [x: string]: unknown; status: \"failure\" | \"success\" | \"warning\"; plugins: { [x: string]: unknown; issues: { [x: string]: unknown; code: string; }[]; }[]; actions: { [x: string]: unknown; issues: { [x: string]: unknown; code: string; }[]; }[]; services: { [x: string]: unknown; issues: { [x: string]: unknown; code: string; }[]; }[]; lifecycle: { [x: string]: unknown; issues: { [x: string]: unknown; code: string; }[]; }[]; issues: { [x: string]: unknown; code: string; }[]; } | null; failure: { code: string; message: string; data: unknown; } | null; }>>;",
+      "signature": "export declare const PreflightFailed: import(\"@arki/failure\").FailureDefinition<\"dot.preflight_failed\", import(\"@standard-schema/spec\").StandardSchemaV1<{ app: { file: string; exportName: string; plugins: number; features: number; } | null; migrations: string[] | null; report: { [x: string]: unknown; status: \"failure\" | \"success\" | \"warning\"; plugins: { [x: string]: unknown; issues: { [x: string]: unknown; code: string; }[]; }[]; actions: { [x: string]: unknown; issues: { [x: string]: unknown; code: string; }[]; }[]; services: { [x: string]: unknown; issues: { [x: string]: unknown; code: string; }[]; }[]; lifecycle: { [x: string]: unknown; issues: { [x: string]: unknown; code: string; }[]; }[]; issues: { [x: string]: unknown; code: string; }[]; } | null; failure: { code: string; message: string; data: unknown; } | null; }, { app: { file: string; exportName: string; plugins: number; features: number; } | null; migrations: string[] | null; report: { [x: string]: unknown; status: \"failure\" | \"success\" | \"warning\"; plugins: { [x: string]: unknown; issues: { [x: string]: unknown; code: string; }[]; }[]; actions: { [x: string]: unknown; issues: { [x: string]: unknown; code: string; }[]; }[]; services: { [x: string]: unknown; issues: { [x: string]: unknown; code: string; }[]; }[]; lifecycle: { [x: string]: unknown; issues: { [x: string]: unknown; code: string; }[]; }[]; issues: { [x: string]: unknown; code: string; }[]; } | null; failure: { code: string; message: string; data: unknown; } | null; }>>;",
       "jsdocSummary": "A managed preflight reported a lifecycle failure, retaining the complete report."
     },
     {
@@ -1273,7 +1280,7 @@
       "subpath": "./cli",
       "name": "ProjectionConflict",
       "kind": "variable",
-      "signature": "export declare const ProjectionConflict: import(\"@arki/failure\").FailureDefinition<\"dot.projection_conflict\", StandardSchemaV1<ProjectionConflictData, ProjectionConflictData>>;",
+      "signature": "export declare const ProjectionConflict: import(\"@arki/failure\").FailureDefinition<\"dot.projection_conflict\", import(\"@standard-schema/spec\").StandardSchemaV1<Readonly<{ format: string; projections: readonly Readonly<{ plugin: string; module: string; }>[]; }>, Readonly<{ format: string; projections: readonly Readonly<{ plugin: string; module: string; }>[]; }>>>;",
       "jsdocSummary": "Two units register different modules for one projection format."
     },
     {
@@ -1287,21 +1294,21 @@
       "subpath": "./cli",
       "name": "ProjectionExecutionFailed",
       "kind": "variable",
-      "signature": "export declare const ProjectionExecutionFailed: import(\"@arki/failure\").FailureDefinition<\"dot.projection_execution_failed\", StandardSchemaV1<ProjectionExecutionFailedData, ProjectionExecutionFailedData>>;",
+      "signature": "export declare const ProjectionExecutionFailed: import(\"@arki/failure\").FailureDefinition<\"dot.projection_execution_failed\", import(\"@standard-schema/spec\").StandardSchemaV1<Readonly<{ format: string; specifier: string; registeringPlugin: string; causeMessage: string; }>, Readonly<{ format: string; specifier: string; registeringPlugin: string; causeMessage: string; }>>>;",
       "jsdocSummary": "`project(manifest)` threw or returned output that does not survive a JSON round trip."
     },
     {
       "subpath": "./cli",
       "name": "ProjectionImportFailed",
       "kind": "variable",
-      "signature": "export declare const ProjectionImportFailed: import(\"@arki/failure\").FailureDefinition<\"dot.projection_import_failed\", StandardSchemaV1<ProjectionImportFailedData, ProjectionImportFailedData>>;",
+      "signature": "export declare const ProjectionImportFailed: import(\"@arki/failure\").FailureDefinition<\"dot.projection_import_failed\", import(\"@standard-schema/spec\").StandardSchemaV1<Readonly<{ specifier: string; registeringPlugin: string; stage: \"export\" | \"import\" | \"resolve\"; causeMessage: string | null; }>, Readonly<{ specifier: string; registeringPlugin: string; stage: \"export\" | \"import\" | \"resolve\"; causeMessage: string | null; }>>>;",
       "jsdocSummary": "The projection module could not be resolved or imported, or exports no `project(manifest)`."
     },
     {
       "subpath": "./cli",
       "name": "ProjectionNotFound",
       "kind": "variable",
-      "signature": "export declare const ProjectionNotFound: import(\"@arki/failure\").FailureDefinition<\"dot.projection_not_found\", StandardSchemaV1<ProjectionNotFoundData, ProjectionNotFoundData>>;",
+      "signature": "export declare const ProjectionNotFound: import(\"@arki/failure\").FailureDefinition<\"dot.projection_not_found\", import(\"@standard-schema/spec\").StandardSchemaV1<Readonly<{ format: string; registeredFormats: readonly string[]; }>, Readonly<{ format: string; registeredFormats: readonly string[]; }>>>;",
       "jsdocSummary": "No unit registers the `--as` format."
     },
     {
@@ -1343,28 +1350,28 @@
       "subpath": "./cli",
       "name": "RunNewOptions",
       "kind": "type",
-      "signature": "export type RunNewOptions = { /** Application name (becomes `package.json#name`). */ readonly name: string; /** * Working directory for resolving `--target`. Defaults to * `process.cwd()` when omitted. */ readonly cwd?: string; /** * Target directory; resolved against `cwd`. Defaults to `<name>` * under `cwd`. The directory is created if missing. */ readonly target?: string; /** Package manager hint surfaced in README/AGENTS.md. Defaults to `bun`. */ readonly pm?: PackageManager; /** * Bundled template to scaffold (`stack` or `minimal`). Defaults to * {@link DEFAULT_TEMPLATE}. Any other value fails with `cli.invalid_input`. */ readonly template?: string; /** When true, only plan operations — write nothing. */ readonly dryRun?: boolean; /** When true, overwrite existing files in the target dir. */ readonly force?: boolean; /** * Override template root. Used by tests; production callers should * leave this undefined so the bundled `templates/app-<template>/` * directory is used. */ readonly templateRoot?: string; /** * Version values inlined into the generated `package.json`. `dot` * defaults to this package's own version; the others default to * {@link TEMPLATE_VERSIONS} (see `versions.ts`). */ readonly versions?: { readonly dot?: string; readonly env?: string; readonly zod?: string; readonly log?: string; readonly db?: string; readonly journal?: string; readonly failure?: string; readonly ui?: string; }; };",
+      "signature": "export type RunNewOptions = { /** Application name (becomes `package.json#name`). */ readonly name: string; /** * Working directory for resolving `--target`. Defaults to * `process.cwd()` when omitted. */ readonly cwd?: string; /** * Target directory; resolved against `cwd`. Defaults to `<name>` * under `cwd`. The directory is created if missing. */ readonly target?: string; /** Package manager hint surfaced in README/AGENTS.md. Defaults to `bun`. */ readonly pm?: PackageManager; /** * Bundled template to scaffold (`stack` or `minimal`). Defaults to * {@link DEFAULT_TEMPLATE}. Any other value fails with `cli.invalid_input`. */ readonly template?: string; /** When true, only plan operations — write nothing. */ readonly dryRun?: boolean; /** When true, overwrite existing files in the target dir. */ readonly force?: boolean; /** * Override template root. Used by tests; production callers should * leave this undefined so the bundled `templates/app-<template>/` * directory is used. */ readonly templateRoot?: string; /** * Version values inlined into the generated `package.json`. `dot` * defaults to this package's own version; the others default to * {@link TEMPLATE_VERSIONS} (see `versions.ts`). */ readonly versions?: { readonly dot?: string; readonly contracts?: string; readonly env?: string; readonly zod?: string; readonly log?: string; readonly db?: string; readonly journal?: string; readonly failure?: string; readonly ui?: string; }; };",
       "jsdocSummary": "Options accepted by {@link runNew}."
     },
     {
       "subpath": "./cli",
       "name": "TargetNotEmpty",
       "kind": "variable",
-      "signature": "export declare const TargetNotEmpty: import(\"@arki/failure\").FailureDefinition<\"dot.target_not_empty\", StandardSchemaV1<TargetNotEmptyData, TargetNotEmptyData>>;",
+      "signature": "export declare const TargetNotEmpty: import(\"@arki/failure\").FailureDefinition<\"dot.target_not_empty\", import(\"@standard-schema/spec\").StandardSchemaV1<Readonly<{ target: string; conflicting: readonly string[]; }>, Readonly<{ target: string; conflicting: readonly string[]; }>>>;",
       "jsdocSummary": "`dot new` would overwrite files in a non-empty target directory."
     },
     {
       "subpath": "./cli",
       "name": "TemplateMissing",
       "kind": "variable",
-      "signature": "export declare const TemplateMissing: import(\"@arki/failure\").FailureDefinition<\"dot.template_missing\", StandardSchemaV1<TemplateMissingData, TemplateMissingData>>;",
+      "signature": "export declare const TemplateMissing: import(\"@arki/failure\").FailureDefinition<\"dot.template_missing\", import(\"@standard-schema/spec\").StandardSchemaV1<Readonly<{ templateRoot: string; }>, Readonly<{ templateRoot: string; }>>>;",
       "jsdocSummary": "The package's bundled template directory is empty or missing."
     },
     {
       "subpath": "./cli",
       "name": "WriteFailed",
       "kind": "variable",
-      "signature": "export declare const WriteFailed: import(\"@arki/failure\").FailureDefinition<\"dot.write_failed\", StandardSchemaV1<WriteFailedData, WriteFailedData>>;",
+      "signature": "export declare const WriteFailed: import(\"@arki/failure\").FailureDefinition<\"dot.write_failed\", import(\"@standard-schema/spec\").StandardSchemaV1<Readonly<{ target: string; written: readonly Readonly<{ path: string; action: \"create\" | \"overwrite\" | \"skip\"; contentHash: string; contentBytes: number; reason: string; }>[]; failed: readonly Readonly<{ path: string; message: string; }>[]; }>, Readonly<{ target: string; written: readonly Readonly<{ path: string; action: \"create\" | \"overwrite\" | \"skip\"; contentHash: string; contentBytes: number; reason: string; }>[]; failed: readonly Readonly<{ path: string; message: string; }>[]; }>>>;",
       "jsdocSummary": "`dot new` could not write some files. `written` lists the ones that landed."
     },
     {
@@ -2856,13 +2863,13 @@
       "name": "renderTimeline",
       "kind": "function",
       "signature": "export declare function renderTimeline(snapshot: DotDiagnosticsSnapshot, opts?: RenderTimelineOptions): string;",
-      "jsdocSummary": "Render the snapshot's lifecycle records as a per-phase waterfall. Pure — no IO. Caller is responsible for printing the result."
+      "jsdocSummary": "Render the snapshot's lifecycle records as a per-phase waterfall. Pure — no IO. Caller is responsible for printing the result. Throws a `FailureError` (`invariant`) when `barWidth` is not a whole number from 1 to 1000."
     },
     {
       "subpath": "./plugin",
       "name": "RenderTimelineOptions",
       "kind": "type",
-      "signature": "export type RenderTimelineOptions = { /** Maximum bar width in characters (default `50`). */ readonly barWidth?: number; /** * When `true`, also emit any unit's diagnostic `issues[]` underneath * the bar so failure reasons are visible in the timeline view. * Default `true`. */ readonly showIssues?: boolean; };",
+      "signature": "export type RenderTimelineOptions = { /** * Maximum bar width in characters (default `50`): a whole number from 1 to 1000. * Any other value is a caller bug and fails an `invariant`. */ readonly barWidth?: number; /** * When `true`, also emit any unit's diagnostic `issues[]` underneath * the bar so failure reasons are visible in the timeline view. * Default `true`. */ readonly showIssues?: boolean; };",
       "jsdocSummary": ""
     },
     {
@@ -3815,13 +3822,13 @@
       "name": "renderTimeline",
       "kind": "function",
       "signature": "export declare function renderTimeline(snapshot: DotDiagnosticsSnapshot, opts?: RenderTimelineOptions): string;",
-      "jsdocSummary": "Render the snapshot's lifecycle records as a per-phase waterfall. Pure — no IO. Caller is responsible for printing the result."
+      "jsdocSummary": "Render the snapshot's lifecycle records as a per-phase waterfall. Pure — no IO. Caller is responsible for printing the result. Throws a `FailureError` (`invariant`) when `barWidth` is not a whole number from 1 to 1000."
     },
     {
       "subpath": "./unit",
       "name": "RenderTimelineOptions",
       "kind": "type",
-      "signature": "export type RenderTimelineOptions = { /** Maximum bar width in characters (default `50`). */ readonly barWidth?: number; /** * When `true`, also emit any unit's diagnostic `issues[]` underneath * the bar so failure reasons are visible in the timeline view. * Default `true`. */ readonly showIssues?: boolean; };",
+      "signature": "export type RenderTimelineOptions = { /** * Maximum bar width in characters (default `50`): a whole number from 1 to 1000. * Any other value is a caller bug and fails an `invariant`. */ readonly barWidth?: number; /** * When `true`, also emit any unit's diagnostic `issues[]` underneath * the bar so failure reasons are visible in the timeline view. * Default `true`. */ readonly showIssues?: boolean; };",
       "jsdocSummary": ""
     },
     {
@@ -4141,6 +4148,7 @@
     "dot.dev_preflight_failed",
     "dot.dev_remote_db_refused",
     "dot.dev_runner_failed",
+    "dot.dev_state_failed",
     "dot.doctor_failed",
     "dot.env_check_failed",
     "dot.env_command_failed",

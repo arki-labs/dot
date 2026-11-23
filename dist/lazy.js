@@ -1,4 +1,5 @@
 import { defineFailure, isFailure, UnexpectedDefect } from '@arki/failure';
+import { is, recordSchema } from '@arki/schema';
 /**
  * An operation tried to initialize a service after its owner closed admission.
  * @fix Use the handle only while its owning application is running.
@@ -106,7 +107,7 @@ export function lazy(init, options = {}) {
 }
 /** Detect a published lazy handle without claiming its cleanup is infallible. */
 export function isLazy(value) {
-    return typeof value === 'object' && value !== null && LazyTag in value && value[LazyTag] === true;
+    return is(value, recordSchema) && Reflect.get(value, LazyTag) === true;
 }
 /**
  * Borrow an already available service without initializing or owning it.

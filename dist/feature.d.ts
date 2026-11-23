@@ -1,31 +1,3 @@
-/**
- * `@arki/dot/feature` — Domain modules for Dot apps: `defineFeature`, its routers and the services bag.
- *
- * A feature is a named, inert declaration of what one domain module
- * contributes to an app, written as one chain:
- *
- *   defineFeature('orders')
- *     .needs({ db })       what the feature takes from the app
- *     .infra({ ... })      its driven adapters (repositories, clients)
- *     .usecases({ ... })   its business rules
- *     .provides({ ... })   capabilities other features may need
- *     .entrypoints(...)    what drives it (rpc routers, jobs, schedules, HTTP routes)
- *
- * Entrypoint declarations come from the adapter that consumes them
- * (e.g. `jobs()` from `@arki/queue/dot`). Each carries its payload plus
- * the manifest actions derived from it, so this module depends on no
- * adapter and the set stays open.
- *
- * The app mounts features in the middle phase of the hexagon:
- *
- *   defineApp(name)
- *     .infra(...)       what features need (db, kv, queue client)
- *     .features([...]) the domain core
- *     .entrypoints(...) what calls the features (http, workers)
- *
- * `.features()` turns each feature into its units; driving adapters are
- * `entrypoint(...)` values that `.entrypoints()` binds to the mounted feature list.
- */
 import type { AnyDefinedFeature } from './define-feature.js';
 import type { ActionSource, AnyHandle, AnyUnit, CtxOf, DotHandlerObserver, NeedsShape, Service, Token, UnitBinder } from './unit-contract.js';
 export { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';

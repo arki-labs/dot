@@ -140,6 +140,9 @@ function substitute(content, vars) {
         return `{{${key}}}`;
     });
 }
+function describeError(error) {
+    return error instanceof Error ? error.message : String(error);
+}
 /**
  * Plan the file operations for a scaffold run. Pure — does not touch
  * disk other than reading templates and `stat`-ing target paths.
@@ -156,13 +159,22 @@ export async function planOperations(opts) {
     const target = resolveTargetDir(opts);
     const templateRoot = opts.templateRoot ?? defaultTemplateRoot(template);
     const pm = opts.pm ?? DEFAULT_PM;
-    const templateFiles = await collectTemplateFiles(templateRoot);
+    // A folder that is missing, unreadable or empty is a broken install: the same returned failure.
+    let templateFiles;
+    try {
+        templateFiles = await collectTemplateFiles(templateRoot);
+    }
+    catch (error) {
+        debugNew.debug('cannot read the template folder {templateRoot}', { templateRoot, error: describeError(error) });
+        return TemplateMissing({ templateRoot });
+    }
     if (templateFiles.length === 0)
         return TemplateMissing({ templateRoot });
     const vars = {
         name: opts.name,
         pkgManager: pm,
         dotVersion: opts.versions?.dot ?? readDotVersion(),
+        contractsVersion: opts.versions?.contracts ?? TEMPLATE_VERSIONS.contracts,
         envVersion: opts.versions?.env ?? TEMPLATE_VERSIONS.env,
         zodVersion: opts.versions?.zod ?? ZOD_VERSION,
         logVersion: opts.versions?.log ?? TEMPLATE_VERSIONS.log,
@@ -174,7 +186,14 @@ export async function planOperations(opts) {
     const operations = [];
     for (const templateRelPath of templateFiles) {
         const absoluteTemplate = path.join(templateRoot, templateRelPath);
-        const raw = await readTemplate(absoluteTemplate);
+        let raw;
+        try {
+            raw = await readTemplate(absoluteTemplate);
+        }
+        catch (error) {
+            debugNew.debug('cannot read the template file {file}', { file: absoluteTemplate, error: describeError(error) });
+            return TemplateMissing({ templateRoot });
+        }
         const rendered = substitute(raw, vars);
         const withoutSuffix = templateRelPath.endsWith(TEMPLATE_SUFFIX)
             ? templateRelPath.slice(0, -TEMPLATE_SUFFIX.length)

@@ -1,4 +1,4 @@
-Read-only mirror of `@arki/dot` v0.10.0. Source and issues: arki-labs/arki. Docs: https://arki.dev/packages/dot. Published 2026-11-02 with provenance https://www.npmjs.com/package/@arki/dot/v/0.10.0#provenance.
+Read-only mirror of `@arki/dot` v0.11.0. Source and issues: arki-labs/arki. Docs: https://arki.dev/packages/dot. Published 2026-11-23 with provenance https://www.npmjs.com/package/@arki/dot/v/0.11.0#provenance.
 
 # @arki/dot
 
@@ -115,6 +115,16 @@ The adapter entries need more:
 | `@arki/dot/orpc`                     | the optional `@orpc/server` peer | Wraps oRPC procedures as actions. |
 
 `bun run test:runtimes` boots a small app through the portable API on every leg, from the built `dist/`.
+
+<!-- runtimes:start -->
+| Runtime | Result | Version tested | Date (UTC) |
+| --- | --- | --- | --- |
+| node | pass | v22.13.1 | 2026-11-05 |
+| bun | pass | 1.4.2 | 2026-11-05 |
+| deno | pass | 2.9.8 | 2026-11-05 |
+| browser | n/a | - | 2026-11-05 |
+| hermes | n/a | - | 2026-11-05 |
+<!-- runtimes:end -->
 
 ## Public imports
 
@@ -257,6 +267,25 @@ The `dot` command returns `dot.*` failure codes (`dot.app_not_found`, `dot.docto
 - **Manifest data is plain JSON.** Functions, `Date`s, `Map`s and cycles in
   action or contract `meta` fail with `ARKI_DOT_E017`, `ARKI_DOT_E031` or
   `ARKI_DOT_E032`.
+
+## Observability
+
+Spans (OpenTelemetry API only; nothing is exported until the app configures an SDK):
+
+| Span | When | Attributes |
+| --- | --- | --- |
+| `dot.app.<phase>` | each `configure`, `boot`, `start`, `stop`, `dispose` of an app | `dot.app.name`, `dot.app.version`, `dot.app.phase`, `dot.app.unit.count`; `failure.code`, `failure.status` on failure |
+| `dot.unit.<hook>` | each unit hook run, under its phase span | `dot.app.name`, `dot.unit.name`, `dot.hook`, `dot.unit.order`; `failure.code`, `failure.status` on failure |
+| `feature.<feature>.<usecase>` | each usecase call | `failure.code`, `failure.status` on a returned failure; the exception when it throws |
+| `dot.action` | each action run (`@arki/dot/execute`) | `dot.action.id`, `dot.binding`, `dot.unit.name`; `failure.code`, `failure.status` on failure |
+| custom | each `telemetryFor(unit).span(name, …)` | the caller's attributes plus `dot.unit.name` |
+| `dot.cli.observability-probe` | `dot doctor` checking that an SDK is registered | none |
+
+The status is error only for a fault (`isFault`, status 500 or higher) or a throw; a failed boot or start is always an error. Each span is active while its work runs, so a package's spans nest under the unit or usecase that called it.
+
+Metrics: `dot.app.phase.duration` (histogram, ms; `dot.app.name`, `dot.app.phase`, `dot.status`) and `dot.unit.hook.duration` (histogram, ms; `dot.app.name`, `dot.unit.name`, `dot.hook`, `dot.status`). `telemetryFor` adds the app's own counters and histograms, tagged with `dot.unit.name`.
+
+Not instrumented: the `defineApp` and `defineFeature` builder chains — pure computation; the graph they build is spanned when it is configured. Details: [Observability](./docs/observability.md).
 
 ## Documentation
 

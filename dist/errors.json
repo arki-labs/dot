@@ -339,7 +339,7 @@
     "what": "Importing the app file threw, or its exported factory did.",
     "fix": "Apply `.error.data.causeRemediation` when it is set; otherwise run `bun <app file>` to reproduce.",
     "verify": "dot explain --json | jq -e .ok",
-    "source": "src/cli/failures.ts:126"
+    "source": "src/cli/failures.ts:97"
   },
   {
     "code": "dot.app_invalid_export",
@@ -348,7 +348,7 @@
     "what": "The app file loaded, but no export is a DOT app, or several are and none is `default` or `app`.",
     "fix": "Export the app as `default` or as `app`.",
     "verify": "dot explain --json | jq -e .ok",
-    "source": "src/cli/failures.ts:89"
+    "source": "src/cli/failures.ts:64"
   },
   {
     "code": "dot.app_lifecycle_failed",
@@ -357,7 +357,7 @@
     "what": "`configure` threw while the CLI prepared the app.",
     "fix": "Read `.error.data.underlyingCode` and look it up in the kernel error table; `ARKI_DOT_E020` means a provider is mounted after its consumer.",
     "verify": "dot explain --json | jq -e .ok",
-    "source": "src/cli/failures.ts:151"
+    "source": "src/cli/failures.ts:115"
   },
   {
     "code": "dot.app_not_found",
@@ -366,7 +366,7 @@
     "what": "No app file at the default paths and no `--app`.",
     "fix": "Create `dot.config.ts` that exports the app, or pass `--app <path>`.",
     "verify": "dot explain --json | jq -e .ok",
-    "source": "src/cli/failures.ts:65"
+    "source": "src/cli/failures.ts:40"
   },
   {
     "code": "dot.dev_already_running",
@@ -375,7 +375,7 @@
     "what": "Another `dot dev` is alive in this project: its pid is in the state file.",
     "fix": "Stop the other `dot dev`; if its pid is not a `dot dev`, delete the file in `.error.data.statePath`.",
     "verify": "dot dev --once --json | jq -e .ok",
-    "source": "src/cli/failures.ts:421"
+    "source": "src/cli/failures.ts:406"
   },
   {
     "code": "dot.dev_app_started",
@@ -384,7 +384,7 @@
     "what": "The app export is already configured, booted or started: `dot dev` cannot own its lifecycle.",
     "fix": "Export the unstarted builder: no `configure()`, `boot()` or `start()` call on the `dev` export.",
     "verify": "dot dev --once --json | jq -e .ok",
-    "source": "src/cli/failures.ts:462"
+    "source": "src/cli/failures.ts:458"
   },
   {
     "code": "dot.dev_db_unreachable",
@@ -393,7 +393,7 @@
     "what": "`dot dev` found no Postgres to talk to: no URL, a bad URL, or a closed port it could not start.",
     "fix": "Start the database, fix `DB_URL` in `.env`, or run `dot dev --db pglite`.",
     "verify": "dot dev --once --json | jq -e .ok",
-    "source": "src/cli/failures.ts:371"
+    "source": "src/cli/failures.ts:362"
   },
   {
     "code": "dot.dev_port_in_use",
@@ -402,7 +402,7 @@
     "what": "Something already listens on the app port, so the runner would not get it.",
     "fix": "Stop the process on that port, or pick another one with `dot dev --port <n>`.",
     "verify": "dot dev --once --json | jq -e .ok",
-    "source": "src/cli/failures.ts:405"
+    "source": "src/cli/failures.ts:392"
   },
   {
     "code": "dot.dev_preflight_failed",
@@ -411,7 +411,7 @@
     "what": "The preflight process did not report a result: a crash, a hang past the timeout, or output that is not its report. Never a pass.",
     "fix": "Read `.error.data.output`, then run `dot doctor --app <file>` to see the same boot in the foreground.",
     "verify": "dot dev --once --json | jq -e .ok",
-    "source": "src/cli/failures.ts:487"
+    "source": "src/cli/failures.ts:483"
   },
   {
     "code": "dot.dev_remote_db_refused",
@@ -420,7 +420,7 @@
     "what": "The database is neither on this machine nor a compose service: `dot dev` would migrate it on boot.",
     "fix": "Point every database URL at this machine or a compose service, or pass `--allow-remote-db` on purpose.",
     "verify": "dot dev --once --json | jq -e .ok",
-    "source": "src/cli/failures.ts:445"
+    "source": "src/cli/failures.ts:443"
   },
   {
     "code": "dot.dev_runner_failed",
@@ -429,7 +429,16 @@
     "what": "The app runner (`vite dev`, `--run`, or `dot _serve`) could not be started.",
     "fix": "Install the runner, or pass the command that serves the app with `dot dev --run \"<cmd>\"`.",
     "verify": "dot dev --once --json | jq -e .ok",
-    "source": "src/cli/failures.ts:388"
+    "source": "src/cli/failures.ts:377"
+  },
+  {
+    "code": "dot.dev_state_failed",
+    "package": "@arki/dot",
+    "kind": "failure",
+    "what": "`dot dev` could not create its state file: the project folder is read-only or full.",
+    "fix": "Make the project folder writable and free some disk space, then run `dot dev` again.",
+    "verify": "dot dev --once --json | jq -e .ok",
+    "source": "src/cli/failures.ts:421"
   },
   {
     "code": "dot.doctor_failed",
@@ -438,7 +447,7 @@
     "what": "`doctor` found error-severity issues. The data is the whole report: `.error.data.plugins[]`.",
     "fix": "Apply the `remediation` of each issue in `.error.data.plugins[].issues` and `.error.data.issues`.",
     "verify": "dot doctor --json | jq -e .ok",
-    "source": "src/cli/failures.ts:273"
+    "source": "src/cli/failures.ts:267"
   },
   {
     "code": "dot.env_check_failed",
@@ -555,7 +564,7 @@
     "what": "An operation tried to initialize a service after its owner closed admission.",
     "fix": "Use the handle only while its owning application is running.",
     "verify": "bun run test -- src/tests/lazy-handle.test.ts",
-    "source": "src/lazy.ts:10"
+    "source": "src/lazy.ts:11"
   },
   {
     "code": "dot.observability_no_sdk",
@@ -564,7 +573,7 @@
     "what": "`doctor --observability` found no OpenTelemetry SDK. Reported as a warning issue in the snapshot, not returned.",
     "fix": "Register an OpenTelemetry SDK once at app entry, before any app boots.",
     "verify": "dot doctor --observability --json | jq '.data.issues'",
-    "source": "src/cli/failures.ts:169"
+    "source": "src/cli/failures.ts:127"
   },
   {
     "code": "dot.preflight_failed",
@@ -573,7 +582,7 @@
     "what": "A managed preflight reported a lifecycle failure, retaining the complete report.",
     "fix": "Read `.error.data.failure.code` and apply its message; inspect `.error.data.report` for diagnostics.",
     "verify": "dot _preflight --json | jq '.error.data.failure.code'",
-    "source": "src/cli/failures.ts:514"
+    "source": "src/cli/failures.ts:503"
   },
   {
     "code": "dot.projection_conflict",
@@ -582,7 +591,7 @@
     "what": "Two units register different modules for one projection format.",
     "fix": "Remove one registration, or make both units register the same module.",
     "verify": "dot explain --as <format> --json | jq -e .ok",
-    "source": "src/cli/failures.ts:255"
+    "source": "src/cli/failures.ts:202"
   },
   {
     "code": "dot.projection_execution_failed",
@@ -591,7 +600,7 @@
     "what": "`project(manifest)` threw or returned output that does not survive a JSON round trip.",
     "fix": "Make `project(manifest)` pure and return JSON-round-trip-safe output.",
     "verify": "dot explain --as <format> --json | jq -e .ok",
-    "source": "src/cli/failures.ts:235"
+    "source": "src/cli/failures.ts:183"
   },
   {
     "code": "dot.projection_import_failed",
@@ -600,7 +609,7 @@
     "what": "The projection module could not be resolved or imported, or exports no `project(manifest)`.",
     "fix": "Install the module and export a named `project(manifest)` function from it.",
     "verify": "dot explain --as <format> --json | jq -e .ok",
-    "source": "src/cli/failures.ts:206"
+    "source": "src/cli/failures.ts:164"
   },
   {
     "code": "dot.projection_not_found",
@@ -609,7 +618,7 @@
     "what": "No unit registers the `--as` format.",
     "fix": "Use a format from `.error.data.registeredFormats`, or mount the adapter that provides it.",
     "verify": "dot explain --as <format> --json | jq -e .ok",
-    "source": "src/cli/failures.ts:182"
+    "source": "src/cli/failures.ts:141"
   },
   {
     "code": "dot.runtime_release_failed",
@@ -636,7 +645,7 @@
     "what": "`dot new` would overwrite files in a non-empty target directory.",
     "fix": "Choose an empty directory, or re-run with `--force` to overwrite.",
     "verify": "dot new <name> --dry-run --json | jq -e .ok",
-    "source": "src/cli/failures.ts:294"
+    "source": "src/cli/failures.ts:281"
   },
   {
     "code": "dot.template_missing",
@@ -645,7 +654,7 @@
     "what": "The package's bundled template directory is empty or missing.",
     "fix": "Reinstall `@arki/dot`: it must ship its `templates/` directory.",
     "verify": "dot new <name> --dry-run --json | jq -e .ok",
-    "source": "src/cli/failures.ts:311"
+    "source": "src/cli/failures.ts:295"
   },
   {
     "code": "dot.write_failed",
@@ -654,6 +663,6 @@
     "what": "`dot new` could not write some files. `written` lists the ones that landed.",
     "fix": "Check the permissions of the target directory, then re-run with `--force`.",
     "verify": "dot new <name> --dry-run --json | jq -e .ok",
-    "source": "src/cli/failures.ts:332"
+    "source": "src/cli/failures.ts:328"
   }
 ]

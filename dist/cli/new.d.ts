@@ -85,6 +85,7 @@ export type RunNewOptions = {
      */
     readonly versions?: {
         readonly dot?: string;
+        readonly contracts?: string;
         readonly env?: string;
         readonly zod?: string;
         readonly log?: string;

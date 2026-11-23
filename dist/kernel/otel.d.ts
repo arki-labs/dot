@@ -43,15 +43,16 @@ export declare function observe<Value>(report: () => Value): Value | undefined;
  */
 export declare function withSpanContext<Value>(span: Span | undefined, run: () => Value): Value;
 /** Observe settlement without replacing the callback's value or promise identity. */
-export declare function withOutcomeSpan<Value>(span: Span | undefined, run: () => Value, recordDuration?: (status: 'ok' | 'failed') => void): Value;
+export declare function withOutcomeSpan<Value>(span: Span | undefined, run: () => Value, recordDuration?: (status: 'ok' | 'failed') => void, alwaysErrorOnFailure?: boolean): Value;
 /**
  * Wrap one usecase so each call runs in an active span named
  * `feature.<featureName>.<usecaseName>`. A value that is not a function is
  * returned as is. Invocation supervision is a separate boundary.
  *
- * - Returns (or resolves to) an `@arki/failure` failure: status ERROR with
- *   `failure.code` and `failure.status`, and no exception event — a failure
- *   is an expected outcome, not a bug.
+ * - Returns (or resolves to) an `@arki/failure` failure: `failure.code` and
+ *   `failure.status`, and no exception event. The status is ERROR only for a
+ *   fault (`isFault`: status 500 or higher); a 4xx refusal is an expected
+ *   outcome and leaves it unset.
  * - Throws (or rejects): the exception is recorded, status ERROR, and the
  *   same value is rethrown.
  * - Anything else: status OK, like the kernel's hook spans.

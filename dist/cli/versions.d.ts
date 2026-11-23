@@ -11,7 +11,10 @@
  * falls behind the workspace `package.json` of that package, so a release
  * that bumps a dependency also has to refresh this table.
  */
-/** Read `version` from `@arki/dot`'s own package.json. */
+/**
+ * Read `version` from `@arki/dot`'s own package.json. A manifest without a
+ * string `version` is a packaging bug, so it fails an `invariant`.
+ */
 export declare function readDotVersion(): string;
 /**
  * Lowest published version of each `@arki/*` dependency the templates use.
@@ -19,10 +22,11 @@ export declare function readDotVersion(): string;
  * placeholder is `{{<camelCaseKey>Version}}` (see `new.ts`).
  */
 export declare const TEMPLATE_VERSIONS: {
+    readonly contracts: '0.4.1';
     readonly env: '0.2.0';
     readonly log: '0.4.0';
-    readonly db: '0.5.0';
-    readonly journal: '0.4.0';
+    readonly db: '0.5.1';
+    readonly journal: '0.4.1';
     readonly failure: '0.3.0';
     readonly ui: '0.2.0';
 };

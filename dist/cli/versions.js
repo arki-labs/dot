@@ -14,16 +14,19 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { invariant } from '@arki/failure';
 import { is, recordSchema } from '@arki/schema';
-/** Read `version` from `@arki/dot`'s own package.json. */
+/**
+ * Read `version` from `@arki/dot`'s own package.json. A manifest without a
+ * string `version` is a packaging bug, so it fails an `invariant`.
+ */
 export function readDotVersion() {
     const here = path.dirname(fileURLToPath(import.meta.url));
     const manifestPath = path.resolve(here, '..', '..', 'package.json');
     const parsed = JSON.parse(readFileSync(manifestPath, 'utf8'));
-    if (is(parsed, recordSchema) && typeof parsed['version'] === 'string') {
-        return parsed['version'];
-    }
-    throw new Error(`@arki/dot: no "version" field in ${manifestPath}`);
+    const version = is(parsed, recordSchema) ? parsed['version'] : undefined;
+    invariant(typeof version === 'string', () => `@arki/dot: no "version" field in ${manifestPath}`);
+    return version;
 }
 /**
  * Lowest published version of each `@arki/*` dependency the templates use.
@@ -31,10 +34,11 @@ export function readDotVersion() {
  * placeholder is `{{<camelCaseKey>Version}}` (see `new.ts`).
  */
 export const TEMPLATE_VERSIONS = {
+    contracts: '0.4.1',
     env: '0.2.0',
     log: '0.4.0',
-    db: '0.5.0',
-    journal: '0.4.0',
+    db: '0.5.1',
+    journal: '0.4.1',
     failure: '0.3.0',
     ui: '0.2.0',
 };

@@ -1,3 +1,32 @@
+/**
+ * `@arki/dot/feature` — Domain modules for Dot apps: `defineFeature`, its routers and the services bag.
+ *
+ * A feature is a named, inert declaration of what one domain module
+ * contributes to an app, written as one chain:
+ *
+ *   defineFeature('orders')
+ *     .needs({ db })       what the feature takes from the app
+ *     .infra({ ... })      its driven adapters (repositories, clients)
+ *     .usecases({ ... })   its business rules
+ *     .provides({ ... })   capabilities other features may need
+ *     .entrypoints(...)    what drives it (rpc routers, jobs, schedules, HTTP routes)
+ *
+ * Entrypoint declarations come from the adapter that consumes them
+ * (e.g. `jobs()` from `@arki/queue/dot`). Each carries its payload plus
+ * the manifest actions derived from it, so this module depends on no
+ * adapter and the set stays open.
+ *
+ * The app mounts features in the middle phase of the hexagon:
+ *
+ *   defineApp(name)
+ *     .infra(...)       what features need (db, kv, queue client)
+ *     .features([...]) the domain core
+ *     .entrypoints(...) what calls the features (http, workers)
+ *
+ * `.features()` turns each feature into its units; driving adapters are
+ * `entrypoint(...)` values that `.entrypoints()` binds to the mounted feature list.
+ */
+import { is, recordSchema } from '@arki/schema';
 import { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
 import { HANDLERS_KEY, isLazy, isLazyWitness, lazyOf, token } from './unit-contract.js';
 export { FEATURE_ERROR_CODES, FeatureError } from './feature-error.js';
@@ -101,8 +130,8 @@ export function bindEntrypoint(adapter, features) {
  */
 export function sliceOf(ctx, f) {
     const key = sliceKeyOf(f);
-    const record = ctx[key];
-    if (typeof record !== 'object' || record === null) {
+    const record = Reflect.get(ctx, key);
+    if (!is(record, recordSchema)) {
         throw new FeatureError({
             code: FEATURE_ERROR_CODES.missingSlices,
             message: `[feature] the slice record of feature "${f.name}" is not in this hook's context.`,

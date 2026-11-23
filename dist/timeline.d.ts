@@ -26,7 +26,10 @@
  */
 import type { DotDiagnosticsSnapshot } from './diagnostics.js';
 export type RenderTimelineOptions = {
-    /** Maximum bar width in characters (default `50`). */
+    /**
+     * Maximum bar width in characters (default `50`): a whole number from 1 to 1000.
+     * Any other value is a caller bug and fails an `invariant`.
+     */
     readonly barWidth?: number;
     /**
      * When `true`, also emit any unit's diagnostic `issues[]` underneath
@@ -38,6 +41,7 @@ export type RenderTimelineOptions = {
 /**
  * Render the snapshot's lifecycle records as a per-phase waterfall.
  * Pure — no IO. Caller is responsible for printing the result.
+ * Throws a `FailureError` (`invariant`) when `barWidth` is not a whole number from 1 to 1000.
  */
 export declare function renderTimeline(snapshot: DotDiagnosticsSnapshot, opts?: RenderTimelineOptions): string;
 //# sourceMappingURL=timeline.d.ts.map

@@ -23,6 +23,8 @@ export declare function readDevState(file: string): Promise<DevState | null>;
 /**
  * Create the state file for this supervisor. A file that names a live pid is
  * `dot.dev_already_running`; a dead pid or an unreadable file is reclaimed.
+ * Any other file-system error (a read-only or full project folder) is
+ * `dot.dev_state_failed`.
  */
 export declare function claimDevState(cwd: string, pid?: number, now?: Date): Promise<{
     readonly file: string;
@@ -32,7 +34,11 @@ export declare function claimDevState(cwd: string, pid?: number, now?: Date): Pr
  * temp file and a rename, so a reader never sees half a file.
  */
 export declare function publishConsoleUrl(file: string, url: string, pid?: number): Promise<void>;
-/** Remove the state file, but only while it still names `pid`: never another supervisor's file. */
+/**
+ * Remove the state file, but only while it still names `pid`: never another supervisor's file.
+ * Never rejects: it runs in `runDev`'s cleanup, where an error would replace the session's
+ * result. A file that cannot be removed is logged at warn and left for the next `claimDevState`.
+ */
 export declare function releaseDevState(file: string, pid?: number): Promise<void>;
 export {};
 //# sourceMappingURL=dev-state.d.ts.map

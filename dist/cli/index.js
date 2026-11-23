@@ -39,7 +39,7 @@ export { devEventSchema } from './dev-events.js';
 export { DEV_STATE_PATH, devStateSchema } from './dev-state.js';
 export { runDoctor } from './doctor.js';
 export { runExplain } from './explain.js';
-export { AppImportFailed, AppInvalidExport, AppLifecycleFailed, AppNotFound, DevAlreadyRunning, DevAppStarted, DevDbUnreachable, DevPortInUse, DevPreflightFailed, DevRemoteDbRefused, DevRunnerFailed, DoctorFailed, ObservabilityNoSdk, PreflightFailed, ProjectionConflict, ProjectionExecutionFailed, ProjectionImportFailed, ProjectionNotFound, TargetNotEmpty, TemplateMissing, WriteFailed, } from './failures.js';
+export { AppImportFailed, AppInvalidExport, AppLifecycleFailed, AppNotFound, DevAlreadyRunning, DevAppStarted, DevDbUnreachable, DevPortInUse, DevPreflightFailed, DevRemoteDbRefused, DevRunnerFailed, DevStateFailed, DoctorFailed, ObservabilityNoSdk, PreflightFailed, ProjectionConflict, ProjectionExecutionFailed, ProjectionImportFailed, ProjectionNotFound, TargetNotEmpty, TemplateMissing, WriteFailed, } from './failures.js';
 export { EnvCheckFailed, EnvCommandFailed, EnvDecryptTracked, EnvKeyNotFound, EnvLoadFailed, EnvNoChange, EnvNoHeader, EnvPlainSecret, EnvRevealRefused, EnvValueMissing, EnvVaultFailed, EnvVaultWriteUnconfirmed, } from './env-failures.js';
 export { runNew } from './new.js';
 // Direct-execution guard: only run the CLI when this module is the entry

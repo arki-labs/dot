@@ -11,7 +11,7 @@ export { runDoctor } from './doctor.js';
 export type { DoctorOptions } from './doctor.js';
 export { runExplain } from './explain.js';
 export type { ExplainData, ExplainOptions } from './explain.js';
-export { AppImportFailed, AppInvalidExport, AppLifecycleFailed, AppNotFound, DevAlreadyRunning, DevAppStarted, DevDbUnreachable, DevPortInUse, DevPreflightFailed, DevRemoteDbRefused, DevRunnerFailed, DoctorFailed, ObservabilityNoSdk, PreflightFailed, ProjectionConflict, ProjectionExecutionFailed, ProjectionImportFailed, ProjectionNotFound, TargetNotEmpty, TemplateMissing, WriteFailed, } from './failures.js';
+export { AppImportFailed, AppInvalidExport, AppLifecycleFailed, AppNotFound, DevAlreadyRunning, DevAppStarted, DevDbUnreachable, DevPortInUse, DevPreflightFailed, DevRemoteDbRefused, DevRunnerFailed, DevStateFailed, DoctorFailed, ObservabilityNoSdk, PreflightFailed, ProjectionConflict, ProjectionExecutionFailed, ProjectionImportFailed, ProjectionNotFound, TargetNotEmpty, TemplateMissing, WriteFailed, } from './failures.js';
 export type { DoctorReport, DoctorStatus } from './failures.js';
 export { EnvCheckFailed, EnvCommandFailed, EnvDecryptTracked, EnvKeyNotFound, EnvLoadFailed, EnvNoChange, EnvNoHeader, EnvPlainSecret, EnvRevealRefused, EnvValueMissing, EnvVaultFailed, EnvVaultWriteUnconfirmed, } from './env-failures.js';
 export type { EnvFinding } from './env-failures.js';

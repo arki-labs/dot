@@ -2,7 +2,7 @@ import type { Span } from '@opentelemetry/api';
 import { context, INVALID_SPAN_CONTEXT, metrics, SpanStatusCode, trace } from '@opentelemetry/api';
 
 import packageMetadata from '@arki/dot/package.json' with { type: 'json' };
-import { isFailure, UnexpectedDefect } from '@arki/failure';
+import { isFailure, isFault, UnexpectedDefect } from '@arki/failure';
 
 import type { DotLifecycleHook } from '../lifecycle.js';
 import { nowMs } from './now.js';
@@ -79,13 +79,20 @@ function stringifyForSpan(value: unknown): string {
   }
 }
 
-/** Record returned outcomes without manufacturing exceptions for expected refusals. */
-function recordOutcome(span: Span, outcome: unknown): 'ok' | 'failed' {
+/**
+ * Record returned outcomes without manufacturing exceptions for expected refusals. A returned failure
+ * always sets `failure.code`; only a fault (`isFault`: status 500 or higher) sets the error status. An
+ * expected outcome (4xx) is an answer, not an error, so its status stays unset. A failed boot is the
+ * exception: `alwaysError` marks the boot and start phase spans and the unit boot and start spans as
+ * errors whatever the failure's status,
+ * because a failed boot means the app did not come up.
+ */
+function recordOutcome(span: Span, outcome: unknown, alwaysError = false): 'ok' | 'failed' {
   if (!isFailure(outcome)) {
     span.setStatus({ code: SpanStatusCode.OK });
     return 'ok';
   }
-  span.setStatus({ code: SpanStatusCode.ERROR, message: outcome.code });
+  if (alwaysError || isFault(outcome)) span.setStatus({ code: SpanStatusCode.ERROR, message: outcome.code });
   span.setAttributes({ 'failure.code': outcome.code, 'failure.status': outcome.status });
   if (UnexpectedDefect.is(outcome) && outcome.cause instanceof Error) span.recordException(outcome.cause);
   return 'failed';
@@ -139,6 +146,7 @@ export function withUnitHookSpan<R>(
         },
       );
     },
+    opts.hook === 'boot' || opts.hook === 'start',
   );
 }
 
@@ -183,6 +191,7 @@ export function withPhaseSpan<R>(
         },
       );
     },
+    opts.phase === 'boot' || opts.phase === 'start',
   );
 }
 
@@ -229,11 +238,12 @@ export function withOutcomeSpan<Value>(
   span: Span | undefined,
   run: () => Value,
   recordDuration?: (status: 'ok' | 'failed') => void,
+  alwaysErrorOnFailure = false,
 ): Value {
   const returned = (value: unknown): void => {
     const status = observe(() => (isFailure(value) ? 'failed' : 'ok'));
     observe(() => {
-      if (span !== undefined) recordOutcome(span, value);
+      if (span !== undefined) recordOutcome(span, value, alwaysErrorOnFailure);
     });
     if (status !== undefined) observe(() => recordDuration?.(status));
     observe(() => span?.end());
@@ -261,9 +271,10 @@ export function withOutcomeSpan<Value>(
  * `feature.<featureName>.<usecaseName>`. A value that is not a function is
  * returned as is. Invocation supervision is a separate boundary.
  *
- * - Returns (or resolves to) an `@arki/failure` failure: status ERROR with
- *   `failure.code` and `failure.status`, and no exception event — a failure
- *   is an expected outcome, not a bug.
+ * - Returns (or resolves to) an `@arki/failure` failure: `failure.code` and
+ *   `failure.status`, and no exception event. The status is ERROR only for a
+ *   fault (`isFault`: status 500 or higher); a 4xx refusal is an expected
+ *   outcome and leaves it unset.
  * - Throws (or rejects): the exception is recorded, status ERROR, and the
  *   same value is rethrown.
  * - Anything else: status OK, like the kernel's hook spans.

@@ -28,7 +28,7 @@ export function needsMiddleware() {
     return (logic) => builder.middleware(({ context, next, path }) => {
         const key = `${logic.name}.services`;
         const services = context.services[key];
-        if (typeof services !== 'object' || services === null) {
+        if (!is(services, recordSchema)) {
             throw new FeatureError({
                 code: FEATURE_ERROR_CODES.missingCapability,
                 message: `[feature] "${logic.name}": its services ("${key}") are not in the request context's bag.`,

@@ -11,7 +11,7 @@ import { link, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { getLogger } from '@arki/log';
-import { DevAlreadyRunning } from './failures.js';
+import { DevAlreadyRunning, DevStateFailed } from './failures.js';
 const debugState = getLogger('arki:dot:cli:dev');
 /** Where the state file lives, relative to the project directory. */
 export const DEV_STATE_PATH = '.local/dot/dev.json';
@@ -97,9 +97,19 @@ async function reclaim(file, pid) {
 /**
  * Create the state file for this supervisor. A file that names a live pid is
  * `dot.dev_already_running`; a dead pid or an unreadable file is reclaimed.
+ * Any other file-system error (a read-only or full project folder) is
+ * `dot.dev_state_failed`.
  */
 export async function claimDevState(cwd, pid = process.pid, now = new Date()) {
     const file = devStatePath(cwd);
+    try {
+        return await claimAt(file, pid, now);
+    }
+    catch (error) {
+        return DevStateFailed({ statePath: file, reason: error instanceof Error ? error.message : String(error) });
+    }
+}
+async function claimAt(file, pid, now) {
     await mkdir(path.dirname(file), { recursive: true });
     const temp = `${file}.${String(pid)}.tmp`;
     const state = { pid, startedAt: now.toISOString() };
@@ -137,11 +147,23 @@ export async function publishConsoleUrl(file, url, pid = process.pid) {
     await writeFile(temp, `${JSON.stringify(next)}\n`);
     await rename(temp, file);
 }
-/** Remove the state file, but only while it still names `pid`: never another supervisor's file. */
+/**
+ * Remove the state file, but only while it still names `pid`: never another supervisor's file.
+ * Never rejects: it runs in `runDev`'s cleanup, where an error would replace the session's
+ * result. A file that cannot be removed is logged at warn and left for the next `claimDevState`.
+ */
 export async function releaseDevState(file, pid = process.pid) {
     const state = await readDevState(file);
     if (state?.pid !== pid)
         return;
-    await rm(file, { force: true });
+    try {
+        await rm(file, { force: true });
+    }
+    catch (error) {
+        debugState.warn('could not remove {file}; the next dot dev reclaims it', {
+            file,
+            error: error instanceof Error ? error.message : String(error),
+        });
+    }
 }
 //# sourceMappingURL=dev-state.js.map
